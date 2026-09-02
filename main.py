@@ -159,7 +159,7 @@ def generate_demo_microbiome():
             row["chao1"]      = round(len(taxa) + np.random.uniform(0, 5), 1)
             row["faith_pd"]   = round(float((noisy > 0).sum()) * 2.1 + float(np.std(noisy[noisy>0])) * 0.5, 2)
             row["classified_pct"] = round(np.random.uniform(70, 99), 1)
-            row["ph"]         = round(np.random.uniform(4, 8), 2)
+            row["ph"]         = round(np.random.uniform(4, 8), 2)   # CORRECTION : emoji → 8
             row["temperature_c"] = round(np.random.uniform(15, 40), 1)
             row["moisture_pct"]  = round(np.random.uniform(5, 80), 1)
             data.append(row)
@@ -612,18 +612,127 @@ def main():
         
         if data_type == "Microbiome":
             st.markdown("### 📂 Import microbiome")
-            uploaded_file = st.file_uploader("Charger CSV/TSV/BIOM/h5ad", type=["csv","tsv","txt","biom","h5ad"])
+            uploaded_file = st.file_uploader("Charger CSV/TSV/BIOM/h5ad", type=["csv","tsv","txt","biom","h5ad","xlsx"])
+            
             if uploaded_file is not None:
-                # Pour la démo, on simule le chargement
-                st.session_state.df_microbiome = generate_demo_microbiome()
-                st.success("Données microbiome chargées (démo).")
+                try:
+                    file_ext = uploaded_file.name.split('.')[-1].lower()
+                    df = None
+                    
+                    # --- BIOM ---
+                    if file_ext == 'biom':
+                        if BIOM_AVAILABLE:
+                            with tempfile.NamedTemporaryFile(delete=False, suffix='.biom') as tmp:
+                                tmp.write(uploaded_file.read())
+                                tmp_path = tmp.name
+                            table = biom.load_table(tmp_path)
+                            df = pd.DataFrame(table.matrix_data.toarray().T,
+                                              index=table.ids(axis='sample'),
+                                              columns=table.ids(axis='observation'))
+                            df.index.name = 'sample_id'
+                            # Ajouter une colonne environment si absente
+                            if 'environment' not in df.columns:
+                                df['environment'] = 'Group1'
+                            st.success(f"✅ Fichier BIOM chargé : {len(df)} échantillons, {len(df.columns)-1} taxons.")
+                            os.unlink(tmp_path)
+                        else:
+                            st.error("❌ La bibliothèque `biom-format` n'est pas installée. Installez-la avec `pip install biom-format`.")
+                    
+                    # --- AnnData (h5ad) ---
+                    elif file_ext == 'h5ad':
+                        if ANNDATA_AVAILABLE:
+                            with tempfile.NamedTemporaryFile(delete=False, suffix='.h5ad') as tmp:
+                                tmp.write(uploaded_file.read())
+                                tmp_path = tmp.name
+                            adata = ad.read_h5ad(tmp_path)
+                            df = pd.DataFrame(adata.X.toarray() if hasattr(adata.X, 'toarray') else adata.X,
+                                              index=adata.obs_names,
+                                              columns=adata.var_names)
+                            df.index.name = 'sample_id'
+                            # Intégrer les métadonnées obs si disponibles
+                            for col in adata.obs.columns:
+                                if col not in df.columns:
+                                    df[col] = adata.obs[col].values
+                            # Si pas de colonne environment, ajouter une par défaut
+                            if 'environment' not in df.columns:
+                                df['environment'] = 'Group1'
+                            st.success(f"✅ Fichier AnnData chargé : {len(df)} échantillons, {len(df.columns)-1} features.")
+                            os.unlink(tmp_path)
+                        else:
+                            st.error("❌ La bibliothèque `anndata` n'est pas installée. Installez-la avec `pip install anndata`.")
+                    
+                    # --- Excel ---
+                    elif file_ext in ['xlsx', 'xls']:
+                        try:
+                            import openpyxl
+                            df = pd.read_excel(uploaded_file, engine='openpyxl')
+                        except ImportError:
+                            st.error("❌ La bibliothèque `openpyxl` n'est pas installée. Installez-la avec `pip install openpyxl`.")
+                    
+                    # --- CSV / TSV (lecture standard) ---
+                    else:
+                        # Détection automatique du séparateur
+                        file_content = uploaded_file.getvalue().decode('utf-8', errors='ignore')
+                        if '\t' in file_content[:1000]:
+                            sep = '\t'
+                        elif ';' in file_content[:1000]:
+                            sep = ';'
+                        else:
+                            sep = ','
+                        df = pd.read_csv(uploaded_file, sep=sep, encoding='utf-8', engine='python')
+                    
+                    # Nettoyage final si df a été chargé
+                    if df is not None and not df.empty:
+                        df = df.dropna(axis=1, how='all')
+                        df = df.replace([np.inf, -np.inf], np.nan).dropna(axis=0, how='all')
+                        # Si la colonne 'environment' n'existe pas, on prend la première colonne non numérique comme groupe
+                        if 'environment' not in df.columns and 'group' not in df.columns:
+                            # Chercher une colonne catégorielle avec peu de valeurs uniques
+                            for col in df.columns:
+                                if df[col].dtype == 'object' and df[col].nunique() <= 10:
+                                    df.rename(columns={col: 'environment'}, inplace=True)
+                                    break
+                            else:
+                                # Sinon, ajouter un groupe par défaut
+                                df['environment'] = 'Group1'
+                        st.session_state.df_microbiome = df
+                        st.success(f"✅ {len(df)} échantillons chargés avec succès ! ({len(df.columns)} colonnes)")
+                        
+                        with st.expander("📋 Aperçu des 5 premières lignes"):
+                            st.dataframe(df.head())
+                        
+                        # Détection des colonnes de groupe
+                        possible_group_cols = ['environment', 'group', 'class', 'condition', 'label']
+                        found_group = [col for col in possible_group_cols if col in df.columns]
+                        if found_group:
+                            st.info(f"🏷️ Colonne de groupe détectée : `{found_group[0]}` ({df[found_group[0]].nunique()} classes)")
+                        else:
+                            st.warning("⚠️ Aucune colonne 'environment', 'group' ou 'class' trouvée. Utilisation de 'environment' par défaut.")
+                    
+                    elif df is not None and df.empty:
+                        st.warning("⚠️ Le fichier est vide ou ne contient pas de données valides.")
+                        
+                except Exception as e:
+                    st.error(f"❌ Erreur lors du chargement : {str(e)}")
+            
             if st.button("⚡ Données démo microbiome"):
                 st.session_state.df_microbiome = generate_demo_microbiome()
                 st.success("Données démo microbiome chargées.")
-            # Afficher les infos
+            
+            # Afficher les infos sur les données actuelles
             df_micro = st.session_state.df_microbiome
-            taxa_cols = detect_feature_cols(df_micro)
-            st.markdown(f"*{len(df_micro)}* échantillons · *{len(taxa_cols)}* features")
+            if df_micro is not None and not df_micro.empty:
+                taxa_cols = detect_feature_cols(df_micro)
+                group_col = None
+                for g in ['environment','group','class','condition','label']:
+                    if g in df_micro.columns:
+                        group_col = g
+                        break
+                st.markdown(f"*{len(df_micro)}* échantillons · *{len(taxa_cols)}* features")
+                if group_col:
+                    st.markdown(f"🏷️ *{group_col}* : {df_micro[group_col].nunique()} classes")
+            else:
+                st.warning("Aucune donnée microbiome chargée.")
             
         else:  # PGM
             st.markdown("### 🧬 Import PGM (VCF)")
@@ -691,10 +800,10 @@ def main():
         col1, col2, col3, col4 = st.columns(4)
         df_micro = st.session_state.df_microbiome
         pgm_df = st.session_state.pgm_data
-        col1.metric("Échantillons (Microbiome)", len(df_micro))
-        col2.metric("Features (Microbiome)", len(detect_feature_cols(df_micro)))
-        col3.metric("Variants (PGM)", len(pgm_df))
-        col4.metric("Groupes (Microbiome)", df_micro["environment"].nunique() if "environment" in df_micro else 0)
+        col1.metric("Échantillons (Microbiome)", len(df_micro) if df_micro is not None else 0)
+        col2.metric("Features (Microbiome)", len(detect_feature_cols(df_micro)) if df_micro is not None else 0)
+        col3.metric("Variants (PGM)", len(pgm_df) if pgm_df is not None else 0)
+        col4.metric("Groupes (Microbiome)", df_micro["environment"].nunique() if df_micro is not None and "environment" in df_micro else 0)
         st.markdown("---")
         st.markdown("""
         *MetaInsight v9* intègre :
@@ -709,10 +818,22 @@ def main():
     with tabs[1]:
         st.markdown("## 📊 Diversité Alfa et Béta")
         df = st.session_state.df_microbiome
+        if df is None or df.empty:
+            st.warning("Aucune donnée microbiome. Chargez un fichier ou utilisez les données démo.")
+            st.stop()
         env_col = "environment"
+        if env_col not in df.columns:
+            # Chercher une colonne de groupe alternative
+            for col in ['group','class','condition','label']:
+                if col in df.columns:
+                    env_col = col
+                    break
+            else:
+                st.error("Aucune colonne de groupe (environment, group, class...) trouvée dans vos données.")
+                st.stop()
         taxa_cols = detect_feature_cols(df)
         if not taxa_cols:
-            st.warning("Aucune feature numérique détectée. Utilisez les données démo.")
+            st.warning("Aucune feature numérique détectée. Vérifiez que vos colonnes d'abondance sont numériques.")
             st.stop()
         st.markdown(
             '<div class="ref-box">📚 QIIME2 (2019 Nature Biotech.) · vegan R · Kers & Saccenti 2021</div>',
@@ -723,13 +844,13 @@ def main():
         with subtabs[0]:
             st.markdown("### Métriques de diversité alpha")
             alpha_df = compute_alpha_diversity(df, taxa_cols)
-            alpha_df["environment"] = df[env_col].values
+            alpha_df[env_col] = df[env_col].values
             metric_alpha = st.selectbox("Métrique alpha",
                 ["Shannon H'","Simpson (1-D)","Richness","Chao1","Evenness (J)","Faith PD (proxy)"])
-            fig_alpha = px.box(alpha_df, x="environment", y=metric_alpha,
-                                color="environment", template="plotly_dark", points="all")
+            fig_alpha = px.box(alpha_df, x=env_col, y=metric_alpha,
+                                color=env_col, template="plotly_dark", points="all")
             st.plotly_chart(fig_alpha, use_container_width=True)
-            st.dataframe(alpha_df.groupby("environment")[metric_alpha].describe().round(3), use_container_width=True)
+            st.dataframe(alpha_df.groupby(env_col)[metric_alpha].describe().round(3), use_container_width=True)
 
         with subtabs[1]:
             st.markdown("### Diversité beta")
@@ -764,11 +885,23 @@ def main():
     with tabs[2]:
         st.markdown("## 🧮 Analyse de l'abondance différentielle")
         df = st.session_state.df_microbiome
+        if df is None or df.empty:
+            st.warning("Aucune donnée microbiome.")
+            st.stop()
         taxa_cols = detect_feature_cols(df)
         if not taxa_cols:
             st.warning("Aucune feature numérique.")
             st.stop()
-        groups = list(df["environment"].unique())
+        # Détecter colonne de groupe
+        group_col = None
+        for g in ['environment','group','class','condition','label']:
+            if g in df.columns:
+                group_col = g
+                break
+        if group_col is None:
+            st.error("Aucune colonne de groupe trouvée. Ajoutez une colonne 'environment', 'group', etc.")
+            st.stop()
+        groups = list(df[group_col].unique())
         col1, col2, col3 = st.columns(3)
         with col1:
             method = st.selectbox("Méthode", ["ALDEx2-like (CLR+Wilcoxon+BH)", "LEfSe (LDA score)", "MaAsLin2-like"])
@@ -778,21 +911,24 @@ def main():
             g2 = st.selectbox("Groupe 2", groups, index=min(1, len(groups)-1))
         if st.button("🚀 Analyser", key="da_btn"):
             if method.startswith("ALDEx2"):
-                res = aldex2_like(df, taxa_cols, "environment", g1, g2)
+                res = aldex2_like(df, taxa_cols, group_col, g1, g2)
                 if res is not None:
                     st.dataframe(res.style.background_gradient(cmap="RdYlGn_r", subset=["BH adj. p-value"]))
             elif method.startswith("LEfSe"):
-                res = lefse_like(df, taxa_cols, "environment")
+                res = lefse_like(df, taxa_cols, group_col)
                 if res is not None:
                     st.dataframe(res.head(15))
             else:
-                res = maaslin2_like(df, taxa_cols, "environment")
+                res = maaslin2_like(df, taxa_cols, group_col)
                 st.dataframe(res.head(15))
 
     # ── Onglet 3 : CoDA / CLR ────────────────────────────────────────────
     with tabs[3]:
         st.markdown("## 🧬 Analyse Compositionnelle (CoDA)")
         df = st.session_state.df_microbiome
+        if df is None or df.empty:
+            st.warning("Aucune donnée microbiome.")
+            st.stop()
         taxa_cols = detect_feature_cols(df)
         if not taxa_cols:
             st.warning("Aucune feature numérique.")
@@ -808,8 +944,18 @@ def main():
         pca = PCA(n_components=2)
         coords = pca.fit_transform(X_show)
         pca_df = pd.DataFrame(coords, columns=["PC1","PC2"])
-        pca_df["environment"] = df["environment"].values
-        fig = px.scatter(pca_df, x="PC1", y="PC2", color="environment",
+        # colonne de groupe
+        group_col = None
+        for g in ['environment','group','class','condition','label']:
+            if g in df.columns:
+                group_col = g
+                break
+        if group_col:
+            pca_df[group_col] = df[group_col].values
+        else:
+            pca_df['Groupe'] = 'All'
+            group_col = 'Groupe'
+        fig = px.scatter(pca_df, x="PC1", y="PC2", color=group_col,
                          title=f"PCA après {transform_choice}", template="plotly_dark")
         st.plotly_chart(fig, use_container_width=True)
 
@@ -817,38 +963,55 @@ def main():
     with tabs[4]:
         st.markdown("## 📈 Raréfaction & Courbes de saturation")
         df = st.session_state.df_microbiome
+        if df is None or df.empty:
+            st.warning("Aucune donnée microbiome.")
+            st.stop()
         taxa_cols = detect_feature_cols(df)
         if not taxa_cols:
             st.warning("Aucune feature numérique.")
             st.stop()
-        if st.button("🚀 Calculer les courbes", key="rare_btn"):
-            curves = rarefaction_curve(df, taxa_cols, 20)
-            fig = go.Figure()
-            colors = px.colors.qualitative.Plotly
-            for i, (env, (depths, richness)) in enumerate(curves.items()):
-                fig.add_trace(go.Scatter(x=depths.tolist(), y=richness,
-                                         mode='lines+markers', name=env,
-                                         line=dict(color=colors[i % len(colors)])))
-            fig.update_layout(template="plotly_dark", title="Courbes de raréfaction")
-            st.plotly_chart(fig, use_container_width=True)
+        if 'environment' not in df.columns:
+            st.warning("La colonne 'environment' est nécessaire pour les courbes de raréfaction.")
+        else:
+            if st.button("🚀 Calculer les courbes", key="rare_btn"):
+                curves = rarefaction_curve(df, taxa_cols, 20)
+                fig = go.Figure()
+                colors = px.colors.qualitative.Plotly
+                for i, (env, (depths, richness)) in enumerate(curves.items()):
+                    fig.add_trace(go.Scatter(x=depths.tolist(), y=richness,
+                                             mode='lines+markers', name=env,
+                                             line=dict(color=colors[i % len(colors)])))
+                fig.update_layout(template="plotly_dark", title="Courbes de raréfaction")
+                st.plotly_chart(fig, use_container_width=True)
 
     # ── Onglet 5 : Biomarqueurs ROC ─────────────────────────────────────
     with tabs[5]:
         st.markdown("## 🔬 Biomarqueurs & Courbes ROC")
         df = st.session_state.df_microbiome
+        if df is None or df.empty:
+            st.warning("Aucune donnée microbiome.")
+            st.stop()
         taxa_cols = detect_feature_cols(df)
         if not taxa_cols:
             st.warning("Aucune feature numérique.")
             st.stop()
-        groups = list(df["environment"].unique())
+        group_col = None
+        for g in ['environment','group','class','condition','label']:
+            if g in df.columns:
+                group_col = g
+                break
+        if group_col is None:
+            st.error("Aucune colonne de groupe.")
+            st.stop()
+        groups = list(df[group_col].unique())
         col1, col2 = st.columns(2)
         with col1:
             g_pos = st.selectbox("Groupe positif", groups, index=0)
         with col2:
             g_neg = st.selectbox("Groupe négatif", groups, index=min(1, len(groups)-1))
         if st.button("🚀 Calculer AUC", key="roc_btn"):
-            sub = df[df["environment"].isin([g_pos, g_neg])]
-            y = (sub["environment"] == g_pos).astype(int).values
+            sub = df[df[group_col].isin([g_pos, g_neg])]
+            y = (sub[group_col] == g_pos).astype(int).values
             auc_results = []
             for tax in taxa_cols[:20]:  # Limite pour performance
                 fpr, tpr, _ = roc_curve(y, sub[tax].values)
@@ -861,21 +1024,30 @@ def main():
     with tabs[6]:
         st.markdown("## 🌿 Annotation Fonctionnelle KEGG")
         df = st.session_state.df_microbiome
+        if df is None or df.empty:
+            st.warning("Aucune donnée microbiome.")
+            st.stop()
         taxa_cols = detect_feature_cols(df)
         if not taxa_cols:
             st.warning("Aucune feature numérique.")
             st.stop()
-        if st.button("🚀 Prédire les voies KEGG", key="kegg_btn"):
-            kegg_df = kegg_functional_prediction(df, taxa_cols)
-            kegg_mean = kegg_df.groupby(df["environment"]).mean()
-            fig = px.imshow(kegg_mean.T, color_continuous_scale="YlOrRd", template="plotly_dark",
-                            title="Voies KEGG prédites par groupe")
-            st.plotly_chart(fig, use_container_width=True)
+        if 'environment' not in df.columns:
+            st.warning("La colonne 'environment' est nécessaire.")
+        else:
+            if st.button("🚀 Prédire les voies KEGG", key="kegg_btn"):
+                kegg_df = kegg_functional_prediction(df, taxa_cols)
+                kegg_mean = kegg_df.groupby(df["environment"]).mean()
+                fig = px.imshow(kegg_mean.T, color_continuous_scale="YlOrRd", template="plotly_dark",
+                                title="Voies KEGG prédites par groupe")
+                st.plotly_chart(fig, use_container_width=True)
 
     # ── Onglet 7 : Multi-Omics ──────────────────────────────────────────
     with tabs[7]:
         st.markdown("## 🔗 Intégration Multi-Omics (CCA)")
         df = st.session_state.df_microbiome
+        if df is None or df.empty:
+            st.warning("Aucune donnée microbiome.")
+            st.stop()
         taxa_cols = detect_feature_cols(df)
         if not taxa_cols:
             st.warning("Aucune feature numérique.")
@@ -886,8 +1058,16 @@ def main():
             X_meta = X_micro[:, :n_met] + np.random.randn(len(df), n_met) * 0.5
             cca = CCA(n_components=2)
             X_c, Y_c = cca.fit_transform(X_micro, X_meta)
-            cca_df = pd.DataFrame({"CCA1": X_c[:,0], "CCA2": Y_c[:,0], "environment": df["environment"].values})
-            fig = px.scatter(cca_df, x="CCA1", y="CCA2", color="environment",
+            group_col = None
+            for g in ['environment','group','class','condition','label']:
+                if g in df.columns:
+                    group_col = g
+                    break
+            if group_col is None:
+                group_col = 'Groupe'
+                df[group_col] = 'All'
+            cca_df = pd.DataFrame({"CCA1": X_c[:,0], "CCA2": Y_c[:,0], group_col: df[group_col].values})
+            fig = px.scatter(cca_df, x="CCA1", y="CCA2", color=group_col,
                              title="CCA Microbiome ↔ Métabolome", template="plotly_dark")
             st.plotly_chart(fig, use_container_width=True)
 
@@ -896,6 +1076,9 @@ def main():
         st.markdown("## 🧬 DNABERT-2 — Analyse de séquences")
         st.info("Module DNABERT-2 : visualisation des patterns d'attention simulés.")
         df = st.session_state.df_microbiome
+        if df is None or df.empty:
+            st.warning("Aucune donnée microbiome.")
+            st.stop()
         taxa_cols = detect_feature_cols(df)
         if not taxa_cols:
             st.warning("Aucune feature numérique.")
@@ -914,6 +1097,9 @@ def main():
     with tabs[9]:
         st.markdown("## ⚗️ Causal ML")
         df = st.session_state.df_microbiome
+        if df is None or df.empty:
+            st.warning("Aucune donnée microbiome.")
+            st.stop()
         taxa_cols = detect_feature_cols(df)
         if not taxa_cols:
             st.warning("Aucune feature numérique.")
@@ -929,14 +1115,25 @@ def main():
     with tabs[10]:
         st.markdown("## ✨ GenAI — Génération de données synthétiques")
         df = st.session_state.df_microbiome
+        if df is None or df.empty:
+            st.warning("Aucune donnée microbiome.")
+            st.stop()
         taxa_cols = detect_feature_cols(df)
         if not taxa_cols:
             st.warning("Aucune feature numérique.")
             st.stop()
         n_samples = st.slider("Échantillons à générer", 10, 200, 50)
-        target_env = st.selectbox("Environnement cible", df["environment"].unique())
+        group_col = None
+        for g in ['environment','group','class','condition','label']:
+            if g in df.columns:
+                group_col = g
+                break
+        if group_col is None:
+            st.error("Aucune colonne de groupe.")
+            st.stop()
+        target_env = st.selectbox("Environnement cible", df[group_col].unique())
         if st.button("✨ Générer", key="gen_btn"):
-            sub = df[df["environment"] == target_env][taxa_cols].values
+            sub = df[df[group_col] == target_env][taxa_cols].values
             mean = sub.mean(axis=0)
             std = sub.std(axis=0) + 1e-6
             synth = np.random.randn(n_samples, len(taxa_cols)) * std + mean
@@ -958,6 +1155,9 @@ def main():
     with tabs[12]:
         st.markdown("## 🔵 Clustering")
         df = st.session_state.df_microbiome
+        if df is None or df.empty:
+            st.warning("Aucune donnée microbiome.")
+            st.stop()
         taxa_cols = detect_feature_cols(df)
         if not taxa_cols:
             st.warning("Aucune feature numérique.")
@@ -977,13 +1177,24 @@ def main():
     with tabs[13]:
         st.markdown("## 🌲 Random Forest")
         df = st.session_state.df_microbiome
+        if df is None or df.empty:
+            st.warning("Aucune donnée microbiome.")
+            st.stop()
         taxa_cols = detect_feature_cols(df)
         if not taxa_cols:
             st.warning("Aucune feature numérique.")
             st.stop()
+        group_col = None
+        for g in ['environment','group','class','condition','label']:
+            if g in df.columns:
+                group_col = g
+                break
+        if group_col is None:
+            st.error("Aucune colonne de groupe.")
+            st.stop()
         if st.button("🚀 Entraîner RF", key="rf_btn"):
             X = clr_transform(df[taxa_cols].values.astype(float) + 1e-9)
-            y = LabelEncoder().fit_transform(df["environment"].values)
+            y = LabelEncoder().fit_transform(df[group_col].values)
             rf = RandomForestClassifier(n_estimators=100, random_state=42)
             rf.fit(X, y)
             imp = pd.DataFrame({"Feature": taxa_cols, "Importance": rf.feature_importances_}).sort_values("Importance", ascending=False).head(10)
@@ -994,6 +1205,9 @@ def main():
     with tabs[14]:
         st.markdown("## ⏱ Dynamique temporelle")
         df = st.session_state.df_microbiome
+        if df is None or df.empty:
+            st.warning("Aucune donnée microbiome.")
+            st.stop()
         taxa_cols = detect_feature_cols(df)
         if not taxa_cols:
             st.warning("Aucune feature numérique.")
@@ -1010,6 +1224,9 @@ def main():
         st.markdown("## 🧩 VAE")
         st.info("Visualisation de l'espace latent via PCA.")
         df = st.session_state.df_microbiome
+        if df is None or df.empty:
+            st.warning("Aucune donnée microbiome.")
+            st.stop()
         taxa_cols = detect_feature_cols(df)
         if not taxa_cols:
             st.warning("Aucune feature numérique.")
@@ -1018,21 +1235,40 @@ def main():
             X = clr_transform(df[taxa_cols].values.astype(float) + 1e-9)
             pca = PCA(n_components=2)
             latent = pca.fit_transform(X)
-            df_plot = pd.DataFrame({"z1": latent[:,0], "z2": latent[:,1], "environment": df["environment"].values})
-            fig = px.scatter(df_plot, x="z1", y="z2", color="environment", template="plotly_dark")
+            group_col = None
+            for g in ['environment','group','class','condition','label']:
+                if g in df.columns:
+                    group_col = g
+                    break
+            if group_col is None:
+                group_col = 'Groupe'
+                df[group_col] = 'All'
+            df_plot = pd.DataFrame({"z1": latent[:,0], "z2": latent[:,1], group_col: df[group_col].values})
+            fig = px.scatter(df_plot, x="z1", y="z2", color=group_col, template="plotly_dark")
             st.plotly_chart(fig, use_container_width=True)
 
     # ── Onglet 16 : XAI/SHAP ────────────────────────────────────────────
     with tabs[16]:
         st.markdown("## 💡 XAI / SHAP")
         df = st.session_state.df_microbiome
+        if df is None or df.empty:
+            st.warning("Aucune donnée microbiome.")
+            st.stop()
         taxa_cols = detect_feature_cols(df)
         if not taxa_cols:
             st.warning("Aucune feature numérique.")
             st.stop()
+        group_col = None
+        for g in ['environment','group','class','condition','label']:
+            if g in df.columns:
+                group_col = g
+                break
+        if group_col is None:
+            st.error("Aucune colonne de groupe.")
+            st.stop()
         if st.button("🚀 Calculer SHAP (approx.)", key="shap_btn"):
             X = clr_transform(df[taxa_cols].values.astype(float) + 1e-9)
-            y = LabelEncoder().fit_transform(df["environment"].values)
+            y = LabelEncoder().fit_transform(df[group_col].values)
             rf = RandomForestClassifier(n_estimators=50, random_state=42)
             rf.fit(X, y)
             imp = permutation_importance(rf, X, y, n_repeats=3, random_state=42)
@@ -1044,6 +1280,9 @@ def main():
     with tabs[17]:
         st.markdown("## 🕸 GNN — Réseau de co-occurrence")
         df = st.session_state.df_microbiome
+        if df is None or df.empty:
+            st.warning("Aucune donnée microbiome.")
+            st.stop()
         taxa_cols = detect_feature_cols(df)
         if not taxa_cols:
             st.warning("Aucune feature numérique.")
@@ -1112,6 +1351,9 @@ def main():
         )
 
         pgm_df = st.session_state.pgm_data
+        if pgm_df is None or pgm_df.empty:
+            st.warning("Aucune donnée PGM. Chargez un fichier VCF ou utilisez les données démo.")
+            st.stop()
 
         # Sous-onglets PGM
         pgm_tabs = st.tabs(["🧬 BRCA1/2", "💊 Pharmacogénétique", "📊 Lollipop Plots", "🧪 Prédiction (CADD/PolyPhen)"])
@@ -1238,5 +1480,8 @@ def main():
             fig = px.bar(counts, x="Prédiction", y="Nb", color="Prédiction", template="plotly_dark")
             st.plotly_chart(fig, use_container_width=True)
 
+# ══════════════════════════════════════════════════════════════════════════════
+#  POINT D'ENTRÉE
+# ══════════════════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
     main()
