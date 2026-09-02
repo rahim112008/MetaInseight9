@@ -19,6 +19,6 @@ pyarrow>=12.0.0
 # Dépendances optionnelles (formats de fichiers étendus)
 # Pour les activer, décommentez les lignes ci‑dessous
 # ═══════════════════════════════════════════════════════════════════
-# biom-format>=2.1.10
-# anndata>=0.10.0
-# h5py>=3.9.0
+biom-format>=2.1.10
+anndata>=0.10.0
+h5py>=3.9.0
