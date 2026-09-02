@@ -1238,5 +1238,4 @@ def main():
             fig = px.bar(counts, x="Prédiction", y="Nb", color="Prédiction", template="plotly_dark")
             st.plotly_chart(fig, use_container_width=True)
 
-if _name_ == "_main_":
-    main()
+if __name__ == "__main__":
