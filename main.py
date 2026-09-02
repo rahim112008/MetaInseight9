@@ -159,7 +159,7 @@ def generate_demo_microbiome():
             row["chao1"]      = round(len(taxa) + np.random.uniform(0, 5), 1)
             row["faith_pd"]   = round(float((noisy > 0).sum()) * 2.1 + float(np.std(noisy[noisy>0])) * 0.5, 2)
             row["classified_pct"] = round(np.random.uniform(70, 99), 1)
-            row["ph"]         = round(np.random.uniform(4, 😎, 2)
+            row["ph"]         = round(np.random.uniform(4, 8), 2)
             row["temperature_c"] = round(np.random.uniform(15, 40), 1)
             row["moisture_pct"]  = round(np.random.uniform(5, 80), 1)
             data.append(row)
