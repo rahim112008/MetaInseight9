@@ -159,7 +159,7 @@ def generate_demo_microbiome():
             row["chao1"]      = round(len(taxa) + np.random.uniform(0, 5), 1)
             row["faith_pd"]   = round(float((noisy > 0).sum()) * 2.1 + float(np.std(noisy[noisy>0])) * 0.5, 2)
             row["classified_pct"] = round(np.random.uniform(70, 99), 1)
-            row["ph"]         = round(np.random.uniform(4, 8), 2)   # CORRECTION : emoji → 8
+            row["ph"]         = round(np.random.uniform(4, 8), 2)
             row["temperature_c"] = round(np.random.uniform(15, 40), 1)
             row["moisture_pct"]  = round(np.random.uniform(5, 80), 1)
             data.append(row)
@@ -541,13 +541,85 @@ def run_deep_model(model_name, X, y, test_size=0.2):
             pass
     return {"Accuracy": acc, "AUC": auc_val, "model": clf}
 
-# ── Fonctions IA (simplifiées) ──────────────────────────────────────────────
-def call_ai(prompt, provider, gemini_key=None, groq_key=None, openrouter_key=None,
-            groq_model="llama-3.1-8b-instant", openrouter_model="mistralai/mistral-7b-instruct:free",
-            gemini_model="gemini-2.0-flash", ollama_model="llama3",
+# ══════════════════════════════════════════════════════════════════════════════
+#  FONCTIONS IA RÉELLES (avec appels API)
+# ══════════════════════════════════════════════════════════════════════════════
+def call_ai(prompt, provider,
+            gemini_key=None, groq_key=None, openrouter_key=None,
+            gemini_model="gemini-2.0-flash", groq_model="llama-3.3-70b-versatile",
+            openrouter_model="mistralai/mistral-7b-instruct:free",
+            ollama_model="llama3",
             claude_key=None, deepseek_key=None):
-    # Pour la démo, on renvoie un texte générique
-    return f"Réponse IA (simulée) pour {provider} sur : {prompt[:100]}... (intégrez vos clés API pour le vrai résultat)"
+    """
+    Appelle l'API du fournisseur IA sélectionné.
+    Retourne la réponse ou un message d'erreur.
+    """
+    try:
+        if provider == "Gemini Flash (Google — GRATUIT)":
+            if not gemini_key:
+                return "🔑 Clé Gemini manquante. Obtenez-en une sur https://aistudio.google.com/apikey"
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent?key={gemini_key}"
+            payload = {
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {"temperature": 0.7, "maxOutputTokens": 1500}
+            }
+            response = requests.post(url, json=payload, timeout=30)
+            if response.status_code == 200:
+                return response.json()["candidates"][0]["content"]["parts"][0]["text"]
+            else:
+                return f"⚠️ Erreur Gemini {response.status_code}: {response.text[:200]}"
+
+        elif provider == "Groq (gratuit)":
+            if not groq_key:
+                return "🔑 Clé Groq manquante. Obtenez-en une sur https://console.groq.com/keys"
+            headers = {"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"}
+            data = {
+                "model": groq_model,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.7,
+                "max_tokens": 1500
+            }
+            response = requests.post("https://api.groq.com/openai/v1/chat/completions", json=data, headers=headers, timeout=30)
+            if response.status_code == 200:
+                return response.json()["choices"][0]["message"]["content"]
+            else:
+                return f"⚠️ Erreur Groq {response.status_code}: {response.text[:200]}"
+
+        elif provider == "OpenRouter (gratuit)":
+            if not openrouter_key:
+                return "🔑 Clé OpenRouter manquante. Obtenez-en une sur https://openrouter.ai/keys"
+            headers = {
+                "Authorization": f"Bearer {openrouter_key}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://metainsight.app",
+                "X-Title": "MetaInsight v9"
+            }
+            data = {
+                "model": openrouter_model,
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": 1500
+            }
+            response = requests.post("https://openrouter.ai/api/v1/chat/completions", json=data, headers=headers, timeout=30)
+            if response.status_code == 200:
+                return response.json()["choices"][0]["message"]["content"]
+            else:
+                return f"⚠️ Erreur OpenRouter {response.status_code}: {response.text[:200]}"
+
+        elif provider == "Ollama (local — gratuit)":
+            url = "http://localhost:11434/api/generate"
+            payload = {"model": ollama_model, "prompt": prompt, "stream": False, "options": {"num_predict": 1200}}
+            try:
+                response = requests.post(url, json=payload, timeout=60)
+                if response.status_code == 200:
+                    return response.json().get("response", "Réponse vide")
+                else:
+                    return f"⚠️ Erreur Ollama {response.status_code}: {response.text[:200]}"
+            except requests.exceptions.ConnectionError:
+                return "❌ Ollama non lancé. Démarrez : ollama serve"
+        else:
+            return "⚠️ Fournisseur non reconnu."
+    except Exception as e:
+        return f"❌ Erreur : {str(e)}"
 
 # ── Fonctions PGM (lecture VCF) ──────────────────────────────────────────────
 def load_vcf_with_duckdb(file_path):
@@ -596,6 +668,10 @@ def main():
         "trans_df": None,
         "gen_df": None,
         "epi_df": None,
+        "gemini_model": "gemini-2.0-flash",
+        "groq_model": "llama-3.3-70b-versatile",
+        "openrouter_model": "mistralai/mistral-7b-instruct:free",
+        "ollama_model": "llama3",
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -630,7 +706,6 @@ def main():
                                               index=table.ids(axis='sample'),
                                               columns=table.ids(axis='observation'))
                             df.index.name = 'sample_id'
-                            # Ajouter une colonne environment si absente
                             if 'environment' not in df.columns:
                                 df['environment'] = 'Group1'
                             st.success(f"✅ Fichier BIOM chargé : {len(df)} échantillons, {len(df.columns)-1} taxons.")
@@ -649,11 +724,9 @@ def main():
                                               index=adata.obs_names,
                                               columns=adata.var_names)
                             df.index.name = 'sample_id'
-                            # Intégrer les métadonnées obs si disponibles
                             for col in adata.obs.columns:
                                 if col not in df.columns:
                                     df[col] = adata.obs[col].values
-                            # Si pas de colonne environment, ajouter une par défaut
                             if 'environment' not in df.columns:
                                 df['environment'] = 'Group1'
                             st.success(f"✅ Fichier AnnData chargé : {len(df)} échantillons, {len(df.columns)-1} features.")
@@ -669,9 +742,8 @@ def main():
                         except ImportError:
                             st.error("❌ La bibliothèque `openpyxl` n'est pas installée. Installez-la avec `pip install openpyxl`.")
                     
-                    # --- CSV / TSV (lecture standard) ---
+                    # --- CSV / TSV ---
                     else:
-                        # Détection automatique du séparateur
                         file_content = uploaded_file.getvalue().decode('utf-8', errors='ignore')
                         if '\t' in file_content[:1000]:
                             sep = '\t'
@@ -681,37 +753,28 @@ def main():
                             sep = ','
                         df = pd.read_csv(uploaded_file, sep=sep, encoding='utf-8', engine='python')
                     
-                    # Nettoyage final si df a été chargé
                     if df is not None and not df.empty:
                         df = df.dropna(axis=1, how='all')
                         df = df.replace([np.inf, -np.inf], np.nan).dropna(axis=0, how='all')
-                        # Si la colonne 'environment' n'existe pas, on prend la première colonne non numérique comme groupe
                         if 'environment' not in df.columns and 'group' not in df.columns:
-                            # Chercher une colonne catégorielle avec peu de valeurs uniques
                             for col in df.columns:
                                 if df[col].dtype == 'object' and df[col].nunique() <= 10:
                                     df.rename(columns={col: 'environment'}, inplace=True)
                                     break
                             else:
-                                # Sinon, ajouter un groupe par défaut
                                 df['environment'] = 'Group1'
                         st.session_state.df_microbiome = df
                         st.success(f"✅ {len(df)} échantillons chargés avec succès ! ({len(df.columns)} colonnes)")
-                        
                         with st.expander("📋 Aperçu des 5 premières lignes"):
                             st.dataframe(df.head())
-                        
-                        # Détection des colonnes de groupe
                         possible_group_cols = ['environment', 'group', 'class', 'condition', 'label']
                         found_group = [col for col in possible_group_cols if col in df.columns]
                         if found_group:
                             st.info(f"🏷️ Colonne de groupe détectée : `{found_group[0]}` ({df[found_group[0]].nunique()} classes)")
                         else:
                             st.warning("⚠️ Aucune colonne 'environment', 'group' ou 'class' trouvée. Utilisation de 'environment' par défaut.")
-                    
                     elif df is not None and df.empty:
                         st.warning("⚠️ Le fichier est vide ou ne contient pas de données valides.")
-                        
                 except Exception as e:
                     st.error(f"❌ Erreur lors du chargement : {str(e)}")
             
@@ -719,7 +782,6 @@ def main():
                 st.session_state.df_microbiome = generate_demo_microbiome()
                 st.success("Données démo microbiome chargées.")
             
-            # Afficher les infos sur les données actuelles
             df_micro = st.session_state.df_microbiome
             if df_micro is not None and not df_micro.empty:
                 taxa_cols = detect_feature_cols(df_micro)
@@ -756,10 +818,50 @@ def main():
             st.markdown(f"*{len(pgm_df)}* variants · *{pgm_df['chrom'].nunique()}* chromosomes")
 
         st.markdown("---")
-        # Configuration IA (simplifiée)
+        # ── Configuration IA (avec champs de saisie des clés) ──────────────
         st.markdown("### 🤖 IA")
-        st.session_state.ai_provider = st.selectbox("Fournisseur", ["Gemini Flash (Google — GRATUIT)", "Groq", "Ollama"], index=0)
-        # Pour la démo, on ne gère pas les clés
+        provider = st.selectbox(
+            "Fournisseur",
+            ["Gemini Flash (Google — GRATUIT)", "Groq (gratuit)", "OpenRouter (gratuit)", "Ollama (local — gratuit)"],
+            index=0,
+            key="ai_provider_select"
+        )
+        st.session_state.ai_provider = provider
+
+        if provider == "Gemini Flash (Google — GRATUIT)":
+            st.markdown("[🔑 Obtenir une clé gratuite](https://aistudio.google.com/apikey)")
+            st.session_state.gemini_key = st.text_input("Clé API Gemini", type="password", 
+                                                        value=st.session_state.get("gemini_key", ""),
+                                                        placeholder="AIza...")
+            st.session_state.gemini_model = st.selectbox("Modèle", ["gemini-2.0-flash", "gemini-2.5-flash"], index=0)
+
+        elif provider == "Groq (gratuit)":
+            st.markdown("[🔑 Obtenir une clé gratuite](https://console.groq.com/keys)")
+            st.session_state.groq_key = st.text_input("Clé API Groq", type="password",
+                                                      value=st.session_state.get("groq_key", ""),
+                                                      placeholder="gsk_...")
+            st.session_state.groq_model = st.selectbox("Modèle Groq", ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"], index=0)
+
+        elif provider == "OpenRouter (gratuit)":
+            st.markdown("[🔑 Obtenir une clé gratuite](https://openrouter.ai/keys)")
+            st.session_state.openrouter_key = st.text_input("Clé API OpenRouter", type="password",
+                                                            value=st.session_state.get("openrouter_key", ""),
+                                                            placeholder="sk-or-...")
+            st.session_state.openrouter_model = st.selectbox("Modèle OpenRouter",
+                                                             ["mistralai/mistral-7b-instruct:free",
+                                                              "meta-llama/llama-3.1-8b-instruct:free"],
+                                                             index=0)
+
+        elif provider == "Ollama (local — gratuit)":
+            st.session_state.ollama_model = st.text_input("Modèle Ollama", 
+                                                          value=st.session_state.get("ollama_model", "llama3"),
+                                                          placeholder="llama3, mistral, etc.")
+            st.caption("💡 Assurez-vous qu'Ollama est lancé : `ollama serve`")
+
+        st.markdown("---")
+        # Affichage des informations de session (optionnel)
+        if st.session_state.get("gemini_key") or st.session_state.get("groq_key") or st.session_state.get("openrouter_key"):
+            st.success("✅ Clé API détectée.")
 
     # ── Onglets ────────────────────────────────────────────────────────────
     tab_names = [
@@ -784,7 +886,7 @@ def main():
         "📄 Rapport IA",
         "🧬 Multi-Omics Avancé",
         "📝 Article Scientifique",
-        "🧬 PGM Clinique"   # Nouvel onglet v9
+        "🧬 PGM Clinique"
     ]
     tabs = st.tabs(tab_names)
 
@@ -810,9 +912,9 @@ def main():
         - *22 modules* d'analyse pour microbiome, multi-omics et génomique médicale (PGM).
         - *Big Data* : lecture directe des VCF via DuckDB, matrices de distance optimisées.
         - *PGM* : BRCA1/2, pharmacogénétique, lollipop plots, prédiction CADD/PolyPhen.
-        - *IA* : modules d'aide à l'interprétation (Gemini, Groq, Ollama).
+        - *IA* : modules d'aide à l'interprétation (Gemini, Groq, OpenRouter, Ollama).
         """)
-        st.info("Utilisez la barre latérale pour charger vos données ou explorer les démos.")
+        st.info("Utilisez la barre latérale pour charger vos données, configurer l'IA et explorer les démos.")
 
     # ── Onglet 1 : Diversité α/β ────────────────────────────────────────
     with tabs[1]:
@@ -823,7 +925,6 @@ def main():
             st.stop()
         env_col = "environment"
         if env_col not in df.columns:
-            # Chercher une colonne de groupe alternative
             for col in ['group','class','condition','label']:
                 if col in df.columns:
                     env_col = col
@@ -892,7 +993,6 @@ def main():
         if not taxa_cols:
             st.warning("Aucune feature numérique.")
             st.stop()
-        # Détecter colonne de groupe
         group_col = None
         for g in ['environment','group','class','condition','label']:
             if g in df.columns:
@@ -944,7 +1044,6 @@ def main():
         pca = PCA(n_components=2)
         coords = pca.fit_transform(X_show)
         pca_df = pd.DataFrame(coords, columns=["PC1","PC2"])
-        # colonne de groupe
         group_col = None
         for g in ['environment','group','class','condition','label']:
             if g in df.columns:
@@ -1013,7 +1112,7 @@ def main():
             sub = df[df[group_col].isin([g_pos, g_neg])]
             y = (sub[group_col] == g_pos).astype(int).values
             auc_results = []
-            for tax in taxa_cols[:20]:  # Limite pour performance
+            for tax in taxa_cols[:20]:
                 fpr, tpr, _ = roc_curve(y, sub[tax].values)
                 auc_val = auc(fpr, tpr)
                 auc_results.append({"Taxon": tax, "AUC": round(auc_val, 3)})
@@ -1320,14 +1419,23 @@ def main():
         st.markdown("## 📄 Rapport IA — Synthèse automatique")
         prompt = st.text_area("Question ou focus", "Analyser les différences entre groupes")
         if st.button("🤖 Générer", key="report_btn"):
-            result = call_ai(prompt, st.session_state.ai_provider)
+            result = call_ai(
+                prompt,
+                st.session_state.ai_provider,
+                gemini_key=st.session_state.get("gemini_key", ""),
+                groq_key=st.session_state.get("groq_key", ""),
+                openrouter_key=st.session_state.get("openrouter_key", ""),
+                gemini_model=st.session_state.get("gemini_model", "gemini-2.0-flash"),
+                groq_model=st.session_state.get("groq_model", "llama-3.3-70b-versatile"),
+                openrouter_model=st.session_state.get("openrouter_model", "mistralai/mistral-7b-instruct:free"),
+                ollama_model=st.session_state.get("ollama_model", "llama3")
+            )
             st.info(result)
 
     # ── Onglet 19 : Multi-Omics Avancé ──────────────────────────────────
     with tabs[19]:
         st.markdown("## 🧬 Multi-Omics Avancé")
         st.info("Intégration multi-omique avec support h5ad (démonstration).")
-        # Pour la démo, on affiche un message
         st.write("Chargez vos fichiers transcriptomique, génomique, épigénomique dans la sidebar pour lancer l'analyse.")
 
     # ── Onglet 20 : Article Scientifique ────────────────────────────────
@@ -1339,7 +1447,17 @@ def main():
             submitted = st.form_submit_button("🤖 Générer l'article")
             if submitted:
                 prompt = f"Générer un article scientifique intitulé '{title}' avec les sections {', '.join(sections)}. Utilisez des données réelles de microbiome."
-                result = call_ai(prompt, st.session_state.ai_provider)
+                result = call_ai(
+                    prompt,
+                    st.session_state.ai_provider,
+                    gemini_key=st.session_state.get("gemini_key", ""),
+                    groq_key=st.session_state.get("groq_key", ""),
+                    openrouter_key=st.session_state.get("openrouter_key", ""),
+                    gemini_model=st.session_state.get("gemini_model", "gemini-2.0-flash"),
+                    groq_model=st.session_state.get("groq_model", "llama-3.3-70b-versatile"),
+                    openrouter_model=st.session_state.get("openrouter_model", "mistralai/mistral-7b-instruct:free"),
+                    ollama_model=st.session_state.get("ollama_model", "llama3")
+                )
                 st.markdown(result)
 
     # ── Onglet 21 : PGM Clinique (v9) ──────────────────────────────────
@@ -1355,10 +1473,8 @@ def main():
             st.warning("Aucune donnée PGM. Chargez un fichier VCF ou utilisez les données démo.")
             st.stop()
 
-        # Sous-onglets PGM
         pgm_tabs = st.tabs(["🧬 BRCA1/2", "💊 Pharmacogénétique", "📊 Lollipop Plots", "🧪 Prédiction (CADD/PolyPhen)"])
 
-        # BRCA1/2
         with pgm_tabs[0]:
             st.markdown("### Variants dans BRCA1 et BRCA2")
             brca_regions = {
@@ -1384,7 +1500,6 @@ def main():
             else:
                 st.info("Aucun variant BRCA1/2 détecté.")
 
-        # Pharmacogénétique
         with pgm_tabs[1]:
             st.markdown("### Variants pharmacogénétiques (CPIC Level A/B)")
             pharma_snps = pd.DataFrame([
@@ -1408,7 +1523,6 @@ def main():
             else:
                 st.warning("Colonne 'rsid' non présente.")
 
-        # Lollipop Plots
         with pgm_tabs[2]:
             st.markdown("### Visualisation des mutations (Lollipop)")
             gene_choice = st.selectbox("Gène cible", ["BRCA1", "BRCA2", "TP53"], index=0)
@@ -1448,7 +1562,6 @@ def main():
                 st.pyplot(fig)
                 plt.close()
 
-        # Prédiction CADD/PolyPhen
         with pgm_tabs[3]:
             st.markdown("### Scores de prédiction in silico (CADD, PolyPhen)")
             if "cadd_phred" in pgm_df.columns:
