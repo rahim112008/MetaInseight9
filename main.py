@@ -1,6 +1,6 @@
 # ══════════════════════════════════════════════════════════════════════════════
 # MetaInsight v9 — Plateforme intégrative multi-omique, PGM & Épitranscriptomique
-# Version complète avec IA avancée, apprentissage incrémental et prédiction
+# Version avec DeepSeek et OpenRouter (Kimi K2) intégrés
 # ══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -608,13 +608,12 @@ def run_deep_model(model_name, X, y, test_size=0.2):
             pass
     return {"Accuracy": acc, "AUC": auc_val, "model": clf}
 
-# ── Fonctions IA (support gratuits) ──────────────────────────────────────
+# ── Fonctions IA (support gratuits : Gemini, Groq, DeepSeek, OpenRouter, Ollama) ──
 def call_ai(prompt, provider,
-            gemini_key=None, groq_key=None, openrouter_key=None,
+            gemini_key=None, groq_key=None, openrouter_key=None, deepseek_key=None,
             gemini_model="gemini-3.6-flash", groq_model="llama-3.3-70b-versatile",
-            openrouter_model="mistralai/mistral-7b-instruct:free",
-            ollama_model="llama3",
-            claude_key=None, deepseek_key=None):
+            openrouter_model="kimi-k2-thinking", ollama_model="llama3",
+            claude_key=None):
     try:
         if provider == "Gemini Flash (Google — GRATUIT)":
             if not gemini_key:
@@ -646,7 +645,23 @@ def call_ai(prompt, provider,
             else:
                 return f"⚠️ Erreur Groq {response.status_code}: {response.text[:200]}"
 
-        elif provider == "OpenRouter (gratuit)":
+        elif provider == "DeepSeek (gratuit)":
+            if not deepseek_key:
+                return "🔑 Clé DeepSeek manquante. Obtenez-en une sur https://platform.deepseek.com/api_keys"
+            headers = {"Authorization": f"Bearer {deepseek_key}", "Content-Type": "application/json"}
+            data = {
+                "model": "deepseek-chat",
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.7,
+                "max_tokens": 1500
+            }
+            response = requests.post("https://api.deepseek.com/v1/chat/completions", json=data, headers=headers, timeout=30)
+            if response.status_code == 200:
+                return response.json()["choices"][0]["message"]["content"]
+            else:
+                return f"⚠️ Erreur DeepSeek {response.status_code}: {response.text[:200]}"
+
+        elif provider == "OpenRouter — Kimi K2 (gratuit)":
             if not openrouter_key:
                 return "🔑 Clé OpenRouter manquante. Obtenez-en une sur https://openrouter.ai/keys"
             headers = {
@@ -801,12 +816,7 @@ def annotate_with_database(epi_df, annotation_db):
     annotated['confidence'] = annotated['confidence']
     return annotated
 
-# ── Nouvelle fonction de prédiction de motifs (améliorée) ──────────────────
 def predict_motif(sequence, modification):
-    """
-    Prédit le motif consensus le plus probable avec score de confiance.
-    """
-    # Motifs connus pour chaque modification
     motifs_dict = {
         'm6A': {'motifs': ['DRACH', 'GGACU', 'RRACH'], 'regex': [r'DRA?CH', r'GGACU', r'RRACH']},
         'm5C': {'motifs': ['CG', 'CNG'], 'regex': [r'CG', r'CNG']},
@@ -947,28 +957,19 @@ def get_default_model():
     )
 
 def extract_features(sequence, position):
-    """
-    Extrait des caractéristiques (composition, motifs, position, dinucléotides).
-    """
     start = max(0, position - 5)
     end = min(len(sequence), position + 5)
     context = sequence[start:end]
-    
     features = []
-    # Composition en bases
     for base in ['A', 'C', 'G', 'T', 'U']:
         features.append(context.count(base) / max(1, len(context)))
-    # Motifs connus
     motifs = ['DRACH', 'UGU', 'CG', 'RRACH', 'CNG', 'GGACU']
     for motif in motifs:
         features.append(1 if motif in context.upper() else 0)
-    # Position relative
     features.append(position / max(1, len(sequence)))
-    # Dinucléotides
     dinucs = ['AA','AC','AG','AU','CA','CC','CG','CU','GA','GC','GG','GU','UA','UC','UG','UU']
     for dinuc in dinucs:
         features.append(context.upper().count(dinuc) / max(1, len(context)-1))
-    # Longueur du contexte
     features.append(len(context) / 10.0)
     return np.array(features)
 
@@ -1011,12 +1012,12 @@ def main():
         "gemini_key": _ENV_GEMINI_KEY,
         "groq_key": _ENV_GROQ_KEY,
         "openrouter_key": _ENV_OPENROUTER_KEY,
-        "claude_key": _ENV_CLAUDE_KEY,
         "deepseek_key": _ENV_DEEPSEEK_KEY,
+        "claude_key": _ENV_CLAUDE_KEY,
         "ai_provider": "Gemini Flash (Google — GRATUIT)",
         "gemini_model": "gemini-3.6-flash",
         "groq_model": "llama-3.3-70b-versatile",
-        "openrouter_model": "mistralai/mistral-7b-instruct:free",
+        "openrouter_model": "kimi-k2-thinking",
         "ollama_model": "llama3",
         "trained_model": load_model(),
     }
@@ -1107,7 +1108,7 @@ def main():
         st.markdown("### 🤖 IA (gratuits)")
         provider = st.selectbox(
             "Fournisseur",
-            ["Gemini Flash (Google — GRATUIT)", "Groq (gratuit)", "OpenRouter (gratuit)", "Ollama (local — gratuit)"],
+            ["Gemini Flash (Google — GRATUIT)", "Groq (gratuit)", "DeepSeek (gratuit)", "OpenRouter — Kimi K2 (gratuit)", "Ollama (local — gratuit)"],
             index=0,
             key="ai_provider_select"
         )
@@ -1118,21 +1119,25 @@ def main():
             st.session_state.gemini_key = st.text_input("Clé API Gemini", type="password", 
                                                         value=st.session_state.get("gemini_key", ""),
                                                         placeholder="AIza...", key="gemini_key_input")
-            st.session_state.gemini_model = st.selectbox("Modèle", ["gemini-3.6-flash", "gemini-2.5-flash", "gemini-2.0-flash"], index=0, key="gemini_model_select")
+            st.session_state.gemini_model = st.selectbox("Modèle", ["gemini-3.6-flash", "gemini-2.5-flash"], index=0, key="gemini_model_select")
         elif provider == "Groq (gratuit)":
             st.markdown("[🔑 Obtenir une clé gratuite](https://console.groq.com/keys)")
             st.session_state.groq_key = st.text_input("Clé API Groq", type="password",
                                                       value=st.session_state.get("groq_key", ""),
                                                       placeholder="gsk_...", key="groq_key_input")
             st.session_state.groq_model = st.selectbox("Modèle Groq", ["llama-3.3-70b-versatile", "mixtral-8x7b-32768"], index=0, key="groq_model_select")
-        elif provider == "OpenRouter (gratuit)":
+        elif provider == "DeepSeek (gratuit)":
+            st.markdown("[🔑 Obtenir une clé gratuite](https://platform.deepseek.com/api_keys)")
+            st.session_state.deepseek_key = st.text_input("Clé API DeepSeek", type="password",
+                                                           value=st.session_state.get("deepseek_key", ""),
+                                                           placeholder="sk-...", key="deepseek_key_input")
+        elif provider == "OpenRouter — Kimi K2 (gratuit)":
             st.markdown("[🔑 Obtenir une clé gratuite](https://openrouter.ai/keys)")
             st.session_state.openrouter_key = st.text_input("Clé API OpenRouter", type="password",
-                                                            value=st.session_state.get("openrouter_key", ""),
-                                                            placeholder="sk-or-...", key="openrouter_key_input")
+                                                             value=st.session_state.get("openrouter_key", ""),
+                                                             placeholder="sk-or-...", key="openrouter_key_input")
             st.session_state.openrouter_model = st.selectbox("Modèle OpenRouter",
-                                                             ["mistralai/mistral-7b-instruct:free",
-                                                              "meta-llama/llama-3.1-8b-instruct:free"],
+                                                             ["kimi-k2-thinking", "kimi-k2-instruct", "mistralai/mistral-7b-instruct:free"],
                                                              index=0, key="openrouter_model_select")
         elif provider == "Ollama (local — gratuit)":
             st.session_state.ollama_model = st.text_input("Modèle Ollama", 
@@ -1142,7 +1147,7 @@ def main():
         
         st.markdown("---")
         st.markdown("### 🧠 Modèle incrémental")
-        if st.button("🔄 Ré-entraîner le modèle sur les données"):
+        if st.button("🔄 Ré-entraîner le modèle sur les données", key="retrain_model_btn"):
             if 'epi_data' in st.session_state and st.session_state.epi_data is not None:
                 df = st.session_state.epi_data
                 X_list, y_list = [], []
@@ -1208,7 +1213,7 @@ def main():
         - **Base de connaissances intégrée** pour l'annotation automatique.
         - **Analyse des BAM** avec extraction des tags de modification (MM/ML).
         - **Prédiction de motifs consensus** et réseaux de crosstalk.
-        - **IA gratuites** : Gemini, Groq, OpenRouter, Ollama.
+        - **IA gratuites** : Gemini, Groq, DeepSeek, OpenRouter (Kimi K2), Ollama.
         - **Apprentissage incrémental** : le modèle s'améliore à chaque nouvelle donnée.
         """)
         st.info("Utilisez la barre latérale pour charger vos données.")
@@ -1717,9 +1722,10 @@ def main():
                 gemini_key=st.session_state.get("gemini_key", ""),
                 groq_key=st.session_state.get("groq_key", ""),
                 openrouter_key=st.session_state.get("openrouter_key", ""),
+                deepseek_key=st.session_state.get("deepseek_key", ""),
                 gemini_model=st.session_state.get("gemini_model", "gemini-3.6-flash"),
                 groq_model=st.session_state.get("groq_model", "llama-3.3-70b-versatile"),
-                openrouter_model=st.session_state.get("openrouter_model", "mistralai/mistral-7b-instruct:free"),
+                openrouter_model=st.session_state.get("openrouter_model", "kimi-k2-thinking"),
                 ollama_model=st.session_state.get("ollama_model", "llama3")
             )
             st.info(result)
@@ -1745,9 +1751,10 @@ def main():
                     gemini_key=st.session_state.get("gemini_key", ""),
                     groq_key=st.session_state.get("groq_key", ""),
                     openrouter_key=st.session_state.get("openrouter_key", ""),
+                    deepseek_key=st.session_state.get("deepseek_key", ""),
                     gemini_model=st.session_state.get("gemini_model", "gemini-3.6-flash"),
                     groq_model=st.session_state.get("groq_model", "llama-3.3-70b-versatile"),
-                    openrouter_model=st.session_state.get("openrouter_model", "mistralai/mistral-7b-instruct:free"),
+                    openrouter_model=st.session_state.get("openrouter_model", "kimi-k2-thinking"),
                     ollama_model=st.session_state.get("ollama_model", "llama3")
                 )
                 st.markdown(result)
@@ -1879,7 +1886,7 @@ def main():
             fig = px.bar(counts, x="Prédiction", y="Nb", color="Prédiction", template="plotly_dark")
             st.plotly_chart(fig, use_container_width=True)
 
-    # ── Onglet 22 : Épitranscriptomique Avancé (amélioré) ──────────────
+    # ── Onglet 22 : Épitranscriptomique Avancé ──────────────────────────────
     with tabs[22]:
         st.markdown("## 🧬 Épitranscriptomique Avancé <span class='badge-new'>v9</span>", unsafe_allow_html=True)
         st.markdown("""
@@ -1893,6 +1900,7 @@ def main():
         - Réseaux de crosstalk entre modifications
         - **Apprentissage incrémental** : le modèle s'entraîne à chaque nouvelle donnée
         - **Prédiction personnalisée** sur séquence ARN
+        - **IA gratuites** : Gemini, Groq, DeepSeek, OpenRouter (Kimi K2), Ollama
         </div>
         """, unsafe_allow_html=True)
 
@@ -1924,7 +1932,6 @@ def main():
                 st.plotly_chart(fig, use_container_width=True)
             
             st.markdown("#### Prédiction de motifs avec score de confiance")
-            # Utiliser la nouvelle fonction
             seq_show = "AUGGCUAGCUAGCUAGCUG"
             mod_type = st.selectbox("Type de modification pour la prédiction", ['m6A', 'm5C', 'Ψ', 'm1A', '2OMe', 'm7G', 'Nm'], key="mod_pred_demo")
             if st.button("🔮 Prédire le motif (démonstration)", key="predict_motif_demo"):
@@ -2029,9 +2036,8 @@ def main():
             st.markdown("### Prédiction de sites de modification par IA")
             st.info("Cette section utilise un modèle entraîné incrémentalement pour prédire la probabilité de modification.")
             
-            # Prédiction personnalisée
             st.markdown("#### Prédiction sur séquence personnalisée")
-            seq_input = st.text_area("Entrez une séquence ARN (ex: AUGGCUAGCUAGCU...)", value="AUGGCUAGCUAGCUAGCUG", height=100)
+            seq_input = st.text_area("Entrez une séquence ARN (ex: AUGGCUAGCUAGCU...)", value="AUGGCUAGCUAGCUAGCUG", height=100, key="epi_seq_input")
             if seq_input:
                 pos = st.number_input("Position à analyser", min_value=1, max_value=len(seq_input), value=len(seq_input)//2, key="epi_pos_pred")
                 if st.button("🔬 Prédire la modification", key="predict_seq_epi"):
@@ -2050,12 +2056,11 @@ def main():
 
             st.markdown("#### Prédiction d'impact sur la traduction")
             if st.button("🧬 Prédire l'impact", key="predict_impact_epi"):
-                # Utiliser les données du transcript sélectionné
                 if 'selected_transcript' in locals():
                     transcript_pos = epi_df[epi_df['transcript_id'] == selected_transcript]['position'].values
                     if len(transcript_pos) > 0:
                         pos_avg = np.mean(transcript_pos)
-                        transcript_len = 2000  # simulé
+                        transcript_len = 2000
                         rel_pos = pos_avg / transcript_len
                         if rel_pos > 0.8:
                             impact_score = 0.85
@@ -2084,7 +2089,6 @@ def main():
                     st.info(f"**Interprétation :** {explanation}")
                     st.caption("Basé sur des modèles de prédiction in silico.")
 
-            # Génération du rapport IA enrichi
             st.markdown("#### Analyse IA des modifications")
             if st.button("🤖 Générer une analyse IA des modifications", key="epi_ai_adv"):
                 stats_parts = []
@@ -2134,9 +2138,10 @@ Rédigez une réponse structurée et accessible à des biologistes non informati
                     gemini_key=st.session_state.get("gemini_key", ""),
                     groq_key=st.session_state.get("groq_key", ""),
                     openrouter_key=st.session_state.get("openrouter_key", ""),
+                    deepseek_key=st.session_state.get("deepseek_key", ""),
                     gemini_model=st.session_state.get("gemini_model", "gemini-3.6-flash"),
                     groq_model=st.session_state.get("groq_model", "llama-3.3-70b-versatile"),
-                    openrouter_model=st.session_state.get("openrouter_model", "mistralai/mistral-7b-instruct:free"),
+                    openrouter_model=st.session_state.get("openrouter_model", "kimi-k2-thinking"),
                     ollama_model=st.session_state.get("ollama_model", "llama3")
                 )
                 st.markdown("### Analyse IA des modifications d'ARN")
