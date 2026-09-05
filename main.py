@@ -69,6 +69,13 @@ try:
 except ImportError:
     BIOPYTHON_AVAILABLE = False
 
+# ── Ajout de statsmodels pour les tendances OLS ────────────────────────────
+try:
+    import statsmodels.api as sm
+    STATSMODELS_AVAILABLE = True
+except ImportError:
+    STATSMODELS_AVAILABLE = False
+
 # ── Clés API (variables d'environnement) ──────────────────────────────────
 _ENV_GEMINI_KEY     = os.environ.get('GEMINI_API_KEY', '')
 _ENV_GROQ_KEY       = os.environ.get('GROQ_API_KEY', '')
@@ -597,7 +604,7 @@ def run_deep_model(model_name, X, y, test_size=0.2):
             pass
     return {"Accuracy": acc, "AUC": auc_val, "model": clf}
 
-# ── # ── Fonctions IA (support gratuits) ──────────────────────────────────────
+# ── ── Fonctions IA (support gratuits) ──────────────────────────────────────
 def call_ai(prompt, provider,
             gemini_key=None, groq_key=None, openrouter_key=None,
             gemini_model="gemini-3.6-flash", groq_model="llama-3.3-70b-versatile",
@@ -649,6 +656,7 @@ def call_ai(prompt, provider,
                 "messages": [{"role": "user", "content": prompt}],
                 "max_tokens": 1500
             }
+            # CORRECTION : URL correcte pour OpenRouter
             response = requests.post("https://openrouter.ai/api/v1/chat/completions", json=data, headers=headers, timeout=30)
             if response.status_code == 200:
                 return response.json()["choices"][0]["message"]["content"]
@@ -914,7 +922,7 @@ def main():
         "claude_key": _ENV_CLAUDE_KEY,
         "deepseek_key": _ENV_DEEPSEEK_KEY,
         "ai_provider": "Gemini Flash (Google — GRATUIT)",
-        "gemini_model": "gemini-2.0-flash",
+        "gemini_model": "gemini-3.6-flash",  # Mise à jour par défaut
         "groq_model": "llama-3.3-70b-versatile",
         "openrouter_model": "mistralai/mistral-7b-instruct:free",
         "ollama_model": "llama3",
@@ -1017,13 +1025,14 @@ def main():
             st.session_state.gemini_key = st.text_input("Clé API Gemini", type="password", 
                                                         value=st.session_state.get("gemini_key", ""),
                                                         placeholder="AIza...", key="gemini_key_input")
-            st.session_state.gemini_model = st.selectbox("Modèle", ["gemini-2.0-flash", "gemini-2.5-flash"], index=0, key="gemini_model_select")
+            # Mise à jour de la liste avec gemini-3.6-flash en premier
+            st.session_state.gemini_model = st.selectbox("Modèle", ["gemini-3.6-flash", "gemini-2.5-flash", "gemini-2.0-flash"], index=0, key="gemini_model_select")
         elif provider == "Groq (gratuit)":
             st.markdown("[🔑 Obtenir une clé gratuite](https://console.groq.com/keys)")
             st.session_state.groq_key = st.text_input("Clé API Groq", type="password",
                                                       value=st.session_state.get("groq_key", ""),
                                                       placeholder="gsk_...", key="groq_key_input")
-            st.session_state.groq_model = st.selectbox("Modèle Groq", ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"], index=0, key="groq_model_select")
+            st.session_state.groq_model = st.selectbox("Modèle Groq", ["llama-3.3-70b-versatile", "mixtral-8x7b-32768"], index=0, key="groq_model_select")
         elif provider == "OpenRouter (gratuit)":
             st.markdown("[🔑 Obtenir une clé gratuite](https://openrouter.ai/keys)")
             st.session_state.openrouter_key = st.text_input("Clé API OpenRouter", type="password",
@@ -1595,7 +1604,7 @@ def main():
                 gemini_key=st.session_state.get("gemini_key", ""),
                 groq_key=st.session_state.get("groq_key", ""),
                 openrouter_key=st.session_state.get("openrouter_key", ""),
-                gemini_model=st.session_state.get("gemini_model", "gemini-2.0-flash"),
+                gemini_model=st.session_state.get("gemini_model", "gemini-3.6-flash"),
                 groq_model=st.session_state.get("groq_model", "llama-3.3-70b-versatile"),
                 openrouter_model=st.session_state.get("openrouter_model", "mistralai/mistral-7b-instruct:free"),
                 ollama_model=st.session_state.get("ollama_model", "llama3")
@@ -1623,7 +1632,7 @@ def main():
                     gemini_key=st.session_state.get("gemini_key", ""),
                     groq_key=st.session_state.get("groq_key", ""),
                     openrouter_key=st.session_state.get("openrouter_key", ""),
-                    gemini_model=st.session_state.get("gemini_model", "gemini-2.0-flash"),
+                    gemini_model=st.session_state.get("gemini_model", "gemini-3.6-flash"),
                     groq_model=st.session_state.get("groq_model", "llama-3.3-70b-versatile"),
                     openrouter_model=st.session_state.get("openrouter_model", "mistralai/mistral-7b-instruct:free"),
                     ollama_model=st.session_state.get("ollama_model", "llama3")
@@ -1946,7 +1955,7 @@ Résumez les tendances, suggérez des interprétations biologiques et identifiez
                 gemini_key=st.session_state.get("gemini_key", ""),
                 groq_key=st.session_state.get("groq_key", ""),
                 openrouter_key=st.session_state.get("openrouter_key", ""),
-                gemini_model=st.session_state.get("gemini_model", "gemini-2.0-flash"),
+                gemini_model=st.session_state.get("gemini_model", "gemini-3.6-flash"),
                 groq_model=st.session_state.get("groq_model", "llama-3.3-70b-versatile"),
                 openrouter_model=st.session_state.get("openrouter_model", "mistralai/mistral-7b-instruct:free"),
                 ollama_model=st.session_state.get("ollama_model", "llama3")
