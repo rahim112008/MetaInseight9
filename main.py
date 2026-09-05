@@ -1551,7 +1551,7 @@ def main():
         if not taxa_cols:
             st.warning("Aucune feature numérique.")
             st.stop()
-        threshold = st.slider("Seuil de corrélation", 0.3, 0.9, 0.5)
+        threshold = st.slider("Seuil de corrélation", 0.3, 0.9, 0.5, key="corr_threshold_gnn")
         if st.button("🚀 Construire le réseau", key="gnn_btn"):
             X = clr_transform(df[taxa_cols].values.astype(float) + 1e-9)
             n_feat = min(15, len(taxa_cols))
@@ -1821,7 +1821,7 @@ def main():
             if fig_heat:
                 st.plotly_chart(fig_heat, use_container_width=True)
             st.markdown("### Réseau de crosstalk entre modifications")
-            threshold = st.slider("Seuil de corrélation", 0.3, 0.9, 0.5)
+            threshold = st.slider("Seuil de corrélation", 0.3, 0.9, 0.5, key="corr_threshold_epi")
             fig_network = plot_crosstalk_network(epi_df, threshold)
             if fig_network:
                 st.plotly_chart(fig_network, use_container_width=True)
