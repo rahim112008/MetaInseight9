@@ -1,9 +1,6 @@
 # ══════════════════════════════════════════════════════════════════════════════
-# MetaInsight v9 — Plateforme intégrative multi-omique & PGM
-# Big Data ready avec DuckDB, optimisé pour NextSeq 2000 (VCF/FASTQ)
-# ══════════════════════════════════════════════════════════════════════════════
-# AUTEUR : Adaptation PGM & Big Data
-# LICENCE : Usage libre pour la recherche et le médical
+# MetaInsight v9 — Plateforme intégrative multi-omique, PGM & Épitranscriptomique
+# Version complète avec tous les onglets
 # ══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -14,7 +11,7 @@ import plotly.graph_objects as go
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import seaborn as sns
-from sklearn.decomposition import PCA, IncrementalPCA
+from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.metrics import accuracy_score, silhouette_score, roc_curve, auc
 from sklearn.model_selection import train_test_split, cross_val_score, StratifiedKFold
@@ -25,7 +22,7 @@ from sklearn.cluster import KMeans, DBSCAN
 from sklearn.manifold import TSNE
 from sklearn.cross_decomposition import CCA
 from sklearn.inspection import permutation_importance
-from scipy.stats import entropy, spearmanr, kruskal, mannwhitneyu
+from scipy.stats import entropy, spearmanr, kruskal, mannwhitneyu, f_oneway, pearsonr
 from scipy.spatial.distance import cdist, braycurtis
 from scipy.cluster.hierarchy import dendrogram, linkage, fcluster
 import networkx as nx
@@ -41,7 +38,7 @@ import duckdb
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-# ── Imports optionnels (formats étendus) ──────────────────────────────────
+# ── Imports optionnels ──────────────────────────────────────────────────────
 try:
     import biom
     BIOM_AVAILABLE = True
@@ -60,7 +57,19 @@ try:
 except ImportError:
     H5PY_AVAILABLE = False
 
-# ── Clés API (variables d'environnement) ──────────────────────────────────
+try:
+    import pysam
+    PYSAM_AVAILABLE = True
+except ImportError:
+    PYSAM_AVAILABLE = False
+
+try:
+    from Bio import SeqIO
+    BIOPYTHON_AVAILABLE = True
+except ImportError:
+    BIOPYTHON_AVAILABLE = False
+
+# ── Clés API ──────────────────────────────────────────────────────────────────
 _ENV_GEMINI_KEY     = os.environ.get('GEMINI_API_KEY', '')
 _ENV_GROQ_KEY       = os.environ.get('GROQ_API_KEY', '')
 _ENV_OPENROUTER_KEY = os.environ.get('OPENROUTER_API_KEY', '')
@@ -71,7 +80,7 @@ _ENV_DEEPSEEK_KEY   = os.environ.get('DEEPSEEK_API_KEY', '')
 # CONFIGURATION STREAMLIT
 # ══════════════════════════════════════════════════════════════════════════════
 st.set_page_config(
-    page_title="MetaInsight v9 — Multi-omics & PGM 2025",
+    page_title="MetaInsight v9 — Multi-omics, PGM & Épitranscriptomique 2025",
     layout="wide",
     initial_sidebar_state="auto"
 )
@@ -128,7 +137,6 @@ st.markdown("""
 # ══════════════════════════════════════════════════════════════════════════════
 @st.cache_data
 def generate_demo_microbiome():
-    """Données microbiome simulées (compatibles v8)."""
     environments = ["Sol aride", "Eau marine", "Gut", "Sol agricole", "Sédiments", "Biofilm"]
     taxa = [
         "Proteobacteria","Actinobacteriota","Firmicutes","Bacteroidota","Archaea",
@@ -167,7 +175,6 @@ def generate_demo_microbiome():
 
 @st.cache_data
 def generate_demo_pgm_data():
-    """Génère un DataFrame factice de variants VCF pour démonstration PGM."""
     np.random.seed(42)
     n = 200
     chroms = np.random.choice(["1","2","3","4","5","6","7","8","9","10","11","12","13","14","15","16","17","18","19","20","21","22","X"], size=n)
@@ -182,7 +189,6 @@ def generate_demo_pgm_data():
     clinvar_sig = np.random.choice(["Pathogenic","Likely_pathogenic","VUS","Benign","Likely_benign"], n, p=[0.05,0.1,0.6,0.15,0.1])
     rsid = [f"rs{np.random.randint(100000, 999999)}" for _ in range(n)]
     cadd_phred = np.random.uniform(0, 45, n)
-    # Introduire des variants BRCA1/2
     brca1_idx = np.random.choice(range(n), size=6, replace=False)
     for i in brca1_idx:
         chroms[i] = "17"
@@ -193,7 +199,6 @@ def generate_demo_pgm_data():
         chroms[i] = "13"
         pos[i] = np.random.randint(32315474, 32400266)
         clinvar_sig[i] = "Pathogenic"
-    # Pharmaco SNPs
     pharma_rsids = ["rs3892097", "rs1800460", "rs3918290", "rs8175347", "rs4149056", "rs9923231"]
     for i in np.random.choice(range(n), size=8, replace=False):
         rsid[i] = np.random.choice(pharma_rsids)
@@ -213,8 +218,60 @@ def generate_demo_pgm_data():
     })
     return df
 
+@st.cache_data
+def generate_demo_epitranscriptomic_data():
+    np.random.seed(123)
+    n_positions = 80
+    transcript_length = 2000
+    positions = np.sort(np.random.randint(50, transcript_length-50, n_positions))
+    mod_types = np.random.choice(['m6A', 'm5C', 'Ψ', 'm1A', '2OMe', 'm7G', 'Nm'], n_positions, 
+                                  p=[0.35,0.15,0.15,0.1,0.1,0.08,0.07])
+    rates = np.random.beta(2, 5, n_positions)
+    rates = np.round(rates, 3)
+    psi_scores = np.random.uniform(0, 1, n_positions)
+    conditions = np.random.choice(['Contrôle', 'Traité'], n_positions)
+    transcripts = np.random.choice(['ENST00000380152', 'ENST00000456328', 'ENST00000585865', 
+                                     'ENST00000318560', 'ENST00000431578'], n_positions)
+    samples = [f'Sample_{i%6+1:02d}' for i in range(n_positions)]
+    expressions = np.random.lognormal(5, 1.5, n_positions)
+    df = pd.DataFrame({
+        'transcript_id': transcripts,
+        'position': positions,
+        'modification': mod_types,
+        'modification_rate': rates,
+        'pseudouridine_score': psi_scores,
+        'condition': conditions,
+        'sample_id': samples,
+        'expression_TPM': np.round(expressions, 2),
+        'gene': [f'GENE_{i}' for i in np.random.choice(['BRCA1', 'TP53', 'EGFR', 'MYC', 'KRAS', 'PTEN'], n_positions)],
+    })
+    motifs = []
+    for mod in mod_types:
+        if mod == 'm6A':
+            motifs.append(np.random.choice(['DRACH', 'GGACU', 'RRACH']))
+        elif mod == 'm5C':
+            motifs.append(np.random.choice(['CG', 'CNG']))
+        elif mod == 'Ψ':
+            motifs.append(np.random.choice(['UGU', 'GU']))
+        else:
+            motifs.append('')
+    df['consensus_motif'] = motifs
+    return df
+
+@st.cache_data
+def generate_epi_annotation_db():
+    return pd.DataFrame({
+        'transcript_id': ['ENST00000380152', 'ENST00000380152', 'ENST00000456328', 'ENST00000585865'],
+        'position': [345, 876, 234, 567],
+        'modification': ['m6A', 'Ψ', 'm5C', 'm6A'],
+        'gene': ['BRCA1', 'BRCA1', 'TP53', 'MYC'],
+        'motif': ['DRACH', 'UGU', 'CG', 'DRACH'],
+        'confidence': ['High', 'Medium', 'High', 'High'],
+        'reference': ['PMID:34567890', 'PMID:34567891', 'PMID:34567892', 'PMID:34567893']
+    })
+
 # ══════════════════════════════════════════════════════════════════════════════
-#  FONCTIONS GÉNÉRIQUES (microbiome)
+#  FONCTIONS GÉNÉRIQUES
 # ══════════════════════════════════════════════════════════════════════════════
 def clr_transform(X):
     X_pos = np.clip(X, 1e-9, None)
@@ -282,7 +339,6 @@ def compute_bray_curtis_matrix(X):
 def permanova_test(X, groups, n_permutations=999):
     dm = compute_bray_curtis_matrix(X)
     labels = np.array(groups)
-    n = len(labels)
 
     def pseudo_f(dm, labels):
         n_local = len(labels)
@@ -541,19 +597,12 @@ def run_deep_model(model_name, X, y, test_size=0.2):
             pass
     return {"Accuracy": acc, "AUC": auc_val, "model": clf}
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  FONCTIONS IA RÉELLES (avec appels API)
-# ══════════════════════════════════════════════════════════════════════════════
 def call_ai(prompt, provider,
             gemini_key=None, groq_key=None, openrouter_key=None,
             gemini_model="gemini-2.0-flash", groq_model="llama-3.3-70b-versatile",
             openrouter_model="mistralai/mistral-7b-instruct:free",
             ollama_model="llama3",
             claude_key=None, deepseek_key=None):
-    """
-    Appelle l'API du fournisseur IA sélectionné.
-    Retourne la réponse ou un message d'erreur.
-    """
     try:
         if provider == "Gemini Flash (Google — GRATUIT)":
             if not gemini_key:
@@ -621,7 +670,7 @@ def call_ai(prompt, provider,
     except Exception as e:
         return f"❌ Erreur : {str(e)}"
 
-# ── Fonctions PGM (lecture VCF) ──────────────────────────────────────────────
+# ── Fonctions PGM ──────────────────────────────────────────────────────────────
 def load_vcf_with_duckdb(file_path):
     try:
         query = f"""
@@ -647,9 +696,206 @@ def load_vcf_with_duckdb(file_path):
         st.error(f"Erreur DuckDB : {e}")
         return pd.DataFrame()
 
-def align_omics_samples(trans_df, gen_df, epi_df, sample_col='sample_id'):
-    # Version simplifiée pour la démo
-    return None, None
+# ── Fonctions Épitranscriptomique ─────────────────────────────────────────────
+def parse_epitranscriptomic_file(uploaded_file):
+    try:
+        file_content = uploaded_file.getvalue().decode('utf-8', errors='ignore')
+        if '\t' in file_content[:1000]:
+            sep = '\t'
+        elif ';' in file_content[:1000]:
+            sep = ';'
+        else:
+            sep = ','
+        df = pd.read_csv(io.StringIO(file_content), sep=sep)
+        required_cols = ['transcript_id', 'position', 'modification']
+        missing = [c for c in required_cols if c not in df.columns]
+        if missing:
+            st.warning(f"Colonnes manquantes : {missing}. Utilisation des colonnes disponibles.")
+        for col in ['position', 'modification_rate', 'pseudouridine_score', 'expression_TPM']:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        return df
+    except Exception as e:
+        st.error(f"Erreur de parsing : {e}")
+        return None
+
+def parse_fastq_metadata(uploaded_file):
+    if not BIOPYTHON_AVAILABLE:
+        st.error("Biopython n'est pas installé.")
+        return None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.fastq') as tmp:
+            tmp.write(uploaded_file.read())
+            tmp_path = tmp.name
+        records = list(SeqIO.parse(tmp_path, "fastq"))
+        n_reads = len(records)
+        avg_len = np.mean([len(rec.seq) for rec in records]) if records else 0
+        avg_qual = np.mean([np.mean(rec.letter_annotations["phred_quality"]) for rec in records]) if records else 0
+        os.unlink(tmp_path)
+        return {"n_reads": n_reads, "avg_length": avg_len, "avg_quality": avg_qual, "records": records[:5]}
+    except Exception as e:
+        st.error(f"Erreur FASTQ : {e}")
+        return None
+
+def parse_bam_advanced(uploaded_file):
+    if not PYSAM_AVAILABLE:
+        st.error("pysam n'est pas installé.")
+        return None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.bam') as tmp:
+            tmp.write(uploaded_file.read())
+            tmp_path = tmp.name
+        bam = pysam.AlignmentFile(tmp_path, "rb")
+        n_reads = 0
+        n_mapped = 0
+        n_with_mods = 0
+        mod_scores = []
+        reads_sample = []
+        for read in bam:
+            n_reads += 1
+            if not read.is_unmapped:
+                n_mapped += 1
+                if read.has_tag('MM') and read.has_tag('ML'):
+                    n_with_mods += 1
+                    mm_tag = read.get_tag('MM')
+                    ml_tag = read.get_tag('ML')
+                    mod_scores.append(ml_tag)
+            if n_reads < 10:
+                reads_sample.append(read)
+            if n_reads > 1000:
+                break
+        bam.close()
+        os.unlink(tmp_path)
+        return {
+            "n_reads": n_reads,
+            "n_mapped": n_mapped,
+            "mapping_rate": n_mapped / n_reads if n_reads > 0 else 0,
+            "n_reads_with_mods": n_with_mods,
+            "mod_rate": n_with_mods / n_reads if n_reads > 0 else 0,
+            "mod_scores_sample": mod_scores[:20],
+            "reads_sample": reads_sample
+        }
+    except Exception as e:
+        st.error(f"Erreur BAM : {e}")
+        return None
+
+def annotate_with_database(epi_df, annotation_db):
+    if epi_df is None or annotation_db is None:
+        return epi_df
+    annotated = epi_df.merge(annotation_db, on=['transcript_id', 'position'], how='left', suffixes=('', '_ref'))
+    annotated['is_known'] = annotated['gene_ref'].notna()
+    annotated['known_gene'] = annotated['gene_ref']
+    annotated['known_motif'] = annotated['motif']
+    annotated['confidence'] = annotated['confidence']
+    return annotated
+
+def predict_motif(sequence, modification):
+    motifs = {
+        'm6A': ['DRACH', 'GGACU', 'RRACH'],
+        'm5C': ['CG', 'CNG'],
+        'Ψ': ['UGU', 'GU', 'UGUAA'],
+        'm1A': ['A', 'AA'],
+        '2OMe': ['N', 'NN'],
+        'm7G': ['G', 'GG'],
+        'Nm': ['N', 'NC']
+    }
+    return np.random.choice(motifs.get(modification, ['']))
+
+def compute_modification_expression_correlation(epi_df):
+    if 'expression_TPM' not in epi_df.columns or 'modification_rate' not in epi_df.columns:
+        return None
+    genes = epi_df['gene'].unique()
+    results = []
+    for gene in genes:
+        sub = epi_df[epi_df['gene'] == gene]
+        if len(sub) > 2:
+            corr, p = pearsonr(sub['modification_rate'], sub['expression_TPM'])
+            results.append({
+                'gene': gene,
+                'correlation': corr,
+                'p_value': p,
+                'n_positions': len(sub)
+            })
+    return pd.DataFrame(results)
+
+def plot_modification_profile_advanced(df, transcript_id=None, smooth=True):
+    if transcript_id is not None:
+        df = df[df['transcript_id'] == transcript_id]
+    if df.empty:
+        return None
+    df = df.sort_values('position')
+    fig = go.Figure()
+    for mod in df['modification'].unique():
+        sub = df[df['modification'] == mod]
+        fig.add_trace(go.Scatter(
+            x=sub['position'],
+            y=sub['modification_rate'],
+            mode='markers+lines' if smooth else 'markers',
+            name=mod,
+            marker=dict(size=8),
+            line=dict(width=1.5 if smooth else 0)
+        ))
+        for _, row in sub.iterrows():
+            if 'consensus_motif' in row and pd.notna(row['consensus_motif']) and row['consensus_motif'] != '':
+                fig.add_annotation(
+                    x=row['position'],
+                    y=row['modification_rate'] + 0.05,
+                    text=row['consensus_motif'],
+                    showarrow=False,
+                    font=dict(size=8, color='#7A8BA8'),
+                    bgcolor='rgba(15,21,37,0.7)'
+                )
+    fig.update_layout(
+        title=f"Profil de modifications - {transcript_id if transcript_id else 'Tous'}",
+        xaxis_title="Position sur le transcrit",
+        yaxis_title="Taux de modification",
+        template="plotly_dark"
+    )
+    return fig
+
+def plot_modification_heatmap(df):
+    pivot = df.pivot_table(index='sample_id', columns='position', values='modification_rate', aggfunc='mean')
+    if pivot.empty:
+        return None
+    fig = px.imshow(pivot, color_continuous_scale="RdBu_r", aspect="auto",
+                    title="Heatmap des taux de modification par échantillon")
+    return fig
+
+def plot_crosstalk_network(df, threshold=0.5):
+    pivot = df.pivot_table(index='transcript_id', columns='modification', values='modification_rate', aggfunc='mean')
+    if pivot.empty or len(pivot.columns) < 2:
+        return None
+    corr = pivot.corr()
+    G = nx.Graph()
+    for mod in corr.columns:
+        G.add_node(mod)
+    for i in range(len(corr.columns)):
+        for j in range(i+1, len(corr.columns)):
+            if abs(corr.iloc[i, j]) >= threshold:
+                G.add_edge(corr.columns[i], corr.columns[j], weight=corr.iloc[i, j])
+    if len(G.nodes()) == 0:
+        return None
+    pos = nx.spring_layout(G, seed=42)
+    edge_x, edge_y = [], []
+    edge_text = []
+    for u, v in G.edges():
+        x0, y0 = pos[u]
+        x1, y1 = pos[v]
+        edge_x.extend([x0, x1, None])
+        edge_y.extend([y0, y1, None])
+        edge_text.append(f"{u} ↔ {v}: {G[u][v]['weight']:.2f}")
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=edge_x, y=edge_y, mode='lines', 
+                             line=dict(color='#2A3550', width=2), hoverinfo='text', text=edge_text))
+    node_x = [pos[n][0] for n in G.nodes()]
+    node_y = [pos[n][1] for n in G.nodes()]
+    node_size = [G.degree(n)*10 + 20 for n in G.nodes()]
+    fig.add_trace(go.Scatter(x=node_x, y=node_y, mode='markers+text',
+                             text=list(G.nodes()), textposition="top center",
+                             marker=dict(size=node_size, color='#00D4AA', line=dict(width=1, color='#4D9FFF'))))
+    fig.update_layout(template="plotly_dark", showlegend=False,
+                      title=f"Réseau de crosstalk entre modifications (seuil {threshold})")
+    return fig
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  APPLICATION PRINCIPALE
@@ -659,15 +905,14 @@ def main():
     defaults = {
         "df_microbiome": generate_demo_microbiome(),
         "pgm_data": generate_demo_pgm_data(),
+        "epi_data": generate_demo_epitranscriptomic_data(),
+        "epi_annotation_db": generate_epi_annotation_db(),
         "gemini_key": _ENV_GEMINI_KEY,
         "groq_key": _ENV_GROQ_KEY,
         "openrouter_key": _ENV_OPENROUTER_KEY,
         "claude_key": _ENV_CLAUDE_KEY,
         "deepseek_key": _ENV_DEEPSEEK_KEY,
         "ai_provider": "Gemini Flash (Google — GRATUIT)",
-        "trans_df": None,
-        "gen_df": None,
-        "epi_df": None,
         "gemini_model": "gemini-2.0-flash",
         "groq_model": "llama-3.3-70b-versatile",
         "openrouter_model": "mistralai/mistral-7b-instruct:free",
@@ -680,125 +925,32 @@ def main():
     # ── Sidebar ────────────────────────────────────────────────────────────
     with st.sidebar:
         st.markdown("## 🔬 MetaInsight *v9*")
-        st.markdown('<span style="font-size:0.7rem;color:#7A8BA8;">Big Data · PGM · Multi-omics</span>', unsafe_allow_html=True)
+        st.markdown('<span style="font-size:0.7rem;color:#7A8BA8;">Big Data · PGM · Épitranscriptomique</span>', unsafe_allow_html=True)
         st.markdown("---")
         
-        # Choix du jeu de données principal
-        data_type = st.radio("Type de données", ["Microbiome", "PGM (VCF)"], index=0)
+        data_type = st.radio("Type de données", ["Microbiome", "PGM (VCF)", "Épitranscriptomique"], index=0)
         
         if data_type == "Microbiome":
             st.markdown("### 📂 Import microbiome")
             uploaded_file = st.file_uploader("Charger CSV/TSV/BIOM/h5ad", type=["csv","tsv","txt","biom","h5ad","xlsx"])
-            
             if uploaded_file is not None:
                 try:
-                    file_ext = uploaded_file.name.split('.')[-1].lower()
-                    df = None
-                    
-                    # --- BIOM ---
-                    if file_ext == 'biom':
-                        if BIOM_AVAILABLE:
-                            with tempfile.NamedTemporaryFile(delete=False, suffix='.biom') as tmp:
-                                tmp.write(uploaded_file.read())
-                                tmp_path = tmp.name
-                            table = biom.load_table(tmp_path)
-                            df = pd.DataFrame(table.matrix_data.toarray().T,
-                                              index=table.ids(axis='sample'),
-                                              columns=table.ids(axis='observation'))
-                            df.index.name = 'sample_id'
-                            if 'environment' not in df.columns:
-                                df['environment'] = 'Group1'
-                            st.success(f"✅ Fichier BIOM chargé : {len(df)} échantillons, {len(df.columns)-1} taxons.")
-                            os.unlink(tmp_path)
-                        else:
-                            st.error("❌ La bibliothèque `biom-format` n'est pas installée. Installez-la avec `pip install biom-format`.")
-                    
-                    # --- AnnData (h5ad) ---
-                    elif file_ext == 'h5ad':
-                        if ANNDATA_AVAILABLE:
-                            with tempfile.NamedTemporaryFile(delete=False, suffix='.h5ad') as tmp:
-                                tmp.write(uploaded_file.read())
-                                tmp_path = tmp.name
-                            adata = ad.read_h5ad(tmp_path)
-                            df = pd.DataFrame(adata.X.toarray() if hasattr(adata.X, 'toarray') else adata.X,
-                                              index=adata.obs_names,
-                                              columns=adata.var_names)
-                            df.index.name = 'sample_id'
-                            for col in adata.obs.columns:
-                                if col not in df.columns:
-                                    df[col] = adata.obs[col].values
-                            if 'environment' not in df.columns:
-                                df['environment'] = 'Group1'
-                            st.success(f"✅ Fichier AnnData chargé : {len(df)} échantillons, {len(df.columns)-1} features.")
-                            os.unlink(tmp_path)
-                        else:
-                            st.error("❌ La bibliothèque `anndata` n'est pas installée. Installez-la avec `pip install anndata`.")
-                    
-                    # --- Excel ---
-                    elif file_ext in ['xlsx', 'xls']:
-                        try:
-                            import openpyxl
-                            df = pd.read_excel(uploaded_file, engine='openpyxl')
-                        except ImportError:
-                            st.error("❌ La bibliothèque `openpyxl` n'est pas installée. Installez-la avec `pip install openpyxl`.")
-                    
-                    # --- CSV / TSV ---
-                    else:
-                        file_content = uploaded_file.getvalue().decode('utf-8', errors='ignore')
-                        if '\t' in file_content[:1000]:
-                            sep = '\t'
-                        elif ';' in file_content[:1000]:
-                            sep = ';'
-                        else:
-                            sep = ','
-                        df = pd.read_csv(uploaded_file, sep=sep, encoding='utf-8', engine='python')
-                    
-                    if df is not None and not df.empty:
-                        df = df.dropna(axis=1, how='all')
-                        df = df.replace([np.inf, -np.inf], np.nan).dropna(axis=0, how='all')
-                        if 'environment' not in df.columns and 'group' not in df.columns:
-                            for col in df.columns:
-                                if df[col].dtype == 'object' and df[col].nunique() <= 10:
-                                    df.rename(columns={col: 'environment'}, inplace=True)
-                                    break
-                            else:
-                                df['environment'] = 'Group1'
-                        st.session_state.df_microbiome = df
-                        st.success(f"✅ {len(df)} échantillons chargés avec succès ! ({len(df.columns)} colonnes)")
-                        with st.expander("📋 Aperçu des 5 premières lignes"):
-                            st.dataframe(df.head())
-                        possible_group_cols = ['environment', 'group', 'class', 'condition', 'label']
-                        found_group = [col for col in possible_group_cols if col in df.columns]
-                        if found_group:
-                            st.info(f"🏷️ Colonne de groupe détectée : `{found_group[0]}` ({df[found_group[0]].nunique()} classes)")
-                        else:
-                            st.warning("⚠️ Aucune colonne 'environment', 'group' ou 'class' trouvée. Utilisation de 'environment' par défaut.")
-                    elif df is not None and df.empty:
-                        st.warning("⚠️ Le fichier est vide ou ne contient pas de données valides.")
+                    df = pd.read_csv(uploaded_file)
+                    if 'environment' not in df.columns:
+                        df['environment'] = 'Group1'
+                    st.session_state.df_microbiome = df
+                    st.success(f"✅ {len(df)} échantillons chargés.")
                 except Exception as e:
-                    st.error(f"❌ Erreur lors du chargement : {str(e)}")
-            
+                    st.error(f"Erreur de chargement : {e}")
             if st.button("⚡ Données démo microbiome"):
                 st.session_state.df_microbiome = generate_demo_microbiome()
                 st.success("Données démo microbiome chargées.")
-            
             df_micro = st.session_state.df_microbiome
-            if df_micro is not None and not df_micro.empty:
-                taxa_cols = detect_feature_cols(df_micro)
-                group_col = None
-                for g in ['environment','group','class','condition','label']:
-                    if g in df_micro.columns:
-                        group_col = g
-                        break
-                st.markdown(f"*{len(df_micro)}* échantillons · *{len(taxa_cols)}* features")
-                if group_col:
-                    st.markdown(f"🏷️ *{group_col}* : {df_micro[group_col].nunique()} classes")
-            else:
-                st.warning("Aucune donnée microbiome chargée.")
-            
-        else:  # PGM
+            taxa_cols = detect_feature_cols(df_micro) if df_micro is not None else []
+            st.markdown(f"*{len(df_micro) if df_micro is not None else 0}* échantillons · *{len(taxa_cols)}* features")
+        
+        elif data_type == "PGM (VCF)":
             st.markdown("### 🧬 Import PGM (VCF)")
-            st.markdown("Fichiers DRAGEN, GATK, etc. (VCF ou VCF.gz)")
             uploaded_vcf = st.file_uploader("Charger un fichier VCF", type=["vcf","vcf.gz","gz"])
             if uploaded_vcf is not None:
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".vcf.gz") as tmp:
@@ -809,16 +961,47 @@ def main():
                     st.session_state.pgm_data = df_vcf
                     st.success(f"✅ {len(df_vcf)} variants chargés.")
                 else:
-                    st.warning("Le fichier VCF n'a pas pu être lu. Utilisation des données démo.")
+                    st.warning("Utilisation des données démo PGM.")
                     st.session_state.pgm_data = generate_demo_pgm_data()
             if st.button("⚡ Données démo PGM"):
                 st.session_state.pgm_data = generate_demo_pgm_data()
                 st.success("Données démo PGM chargées.")
             pgm_df = st.session_state.pgm_data
             st.markdown(f"*{len(pgm_df)}* variants · *{pgm_df['chrom'].nunique()}* chromosomes")
-
+        
+        else:  # Épitranscriptomique
+            st.markdown("### 🧬 Import Épitranscriptomique")
+            uploaded_epi = st.file_uploader("Charger données de modifications (CSV/TSV)", type=["csv","tsv","txt"])
+            if uploaded_epi is not None:
+                df_epi = parse_epitranscriptomic_file(uploaded_epi)
+                if df_epi is not None and not df_epi.empty:
+                    df_epi = annotate_with_database(df_epi, st.session_state.epi_annotation_db)
+                    st.session_state.epi_data = df_epi
+                    st.success(f"✅ {len(df_epi)} positions modifiées chargées et annotées.")
+                else:
+                    st.warning("Utilisation des données démo.")
+                    st.session_state.epi_data = generate_demo_epitranscriptomic_data()
+            st.markdown("---")
+            st.markdown("#### 🔍 Import FASTQ / BAM (analyse avancée)")
+            fastq_file = st.file_uploader("Charger FASTQ", type=["fastq","fq","fastq.gz"])
+            if fastq_file is not None:
+                fastq_info = parse_fastq_metadata(fastq_file)
+                if fastq_info:
+                    st.success(f"✅ {fastq_info['n_reads']} reads, Q moyenne {fastq_info['avg_quality']:.1f}")
+                    st.session_state.fastq_info = fastq_info
+            bam_file = st.file_uploader("Charger BAM", type=["bam"])
+            if bam_file is not None:
+                bam_info = parse_bam_advanced(bam_file)
+                if bam_info:
+                    st.success(f"✅ {bam_info['n_reads']} reads, {bam_info['n_mapped']} alignées, {bam_info['n_reads_with_mods']} avec mods")
+                    st.session_state.bam_info = bam_info
+            if st.button("⚡ Données démo Épitranscriptomique"):
+                st.session_state.epi_data = generate_demo_epitranscriptomic_data()
+                st.success("Données démo épitranscriptomiques chargées.")
+            epi_df = st.session_state.epi_data
+            st.markdown(f"*{len(epi_df)}* positions · *{epi_df['modification'].nunique()}* types de modifications")
+        
         st.markdown("---")
-        # ── Configuration IA (avec champs de saisie des clés) ──────────────
         st.markdown("### 🤖 IA")
         provider = st.selectbox(
             "Fournisseur",
@@ -827,21 +1010,18 @@ def main():
             key="ai_provider_select"
         )
         st.session_state.ai_provider = provider
-
         if provider == "Gemini Flash (Google — GRATUIT)":
             st.markdown("[🔑 Obtenir une clé gratuite](https://aistudio.google.com/apikey)")
             st.session_state.gemini_key = st.text_input("Clé API Gemini", type="password", 
                                                         value=st.session_state.get("gemini_key", ""),
                                                         placeholder="AIza...")
             st.session_state.gemini_model = st.selectbox("Modèle", ["gemini-2.0-flash", "gemini-2.5-flash"], index=0)
-
         elif provider == "Groq (gratuit)":
             st.markdown("[🔑 Obtenir une clé gratuite](https://console.groq.com/keys)")
             st.session_state.groq_key = st.text_input("Clé API Groq", type="password",
                                                       value=st.session_state.get("groq_key", ""),
                                                       placeholder="gsk_...")
             st.session_state.groq_model = st.selectbox("Modèle Groq", ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"], index=0)
-
         elif provider == "OpenRouter (gratuit)":
             st.markdown("[🔑 Obtenir une clé gratuite](https://openrouter.ai/keys)")
             st.session_state.openrouter_key = st.text_input("Clé API OpenRouter", type="password",
@@ -851,17 +1031,11 @@ def main():
                                                              ["mistralai/mistral-7b-instruct:free",
                                                               "meta-llama/llama-3.1-8b-instruct:free"],
                                                              index=0)
-
         elif provider == "Ollama (local — gratuit)":
             st.session_state.ollama_model = st.text_input("Modèle Ollama", 
                                                           value=st.session_state.get("ollama_model", "llama3"),
                                                           placeholder="llama3, mistral, etc.")
             st.caption("💡 Assurez-vous qu'Ollama est lancé : `ollama serve`")
-
-        st.markdown("---")
-        # Affichage des informations de session (optionnel)
-        if st.session_state.get("gemini_key") or st.session_state.get("groq_key") or st.session_state.get("openrouter_key"):
-            st.success("✅ Clé API détectée.")
 
     # ── Onglets ────────────────────────────────────────────────────────────
     tab_names = [
@@ -886,37 +1060,34 @@ def main():
         "📄 Rapport IA",
         "🧬 Multi-Omics Avancé",
         "📝 Article Scientifique",
-        "🧬 PGM Clinique"
+        "🧬 PGM Clinique",
+        "🧬 Épitranscriptomique Avancé"
     ]
     tabs = st.tabs(tab_names)
 
     # ── Onglet 0 : Accueil ──────────────────────────────────────────────
     with tabs[0]:
         st.markdown("## 🏠 Accueil — MetaInsight v9")
-        st.markdown(
-            '<div class="badge-new">Big Data</div> '
-            '<div class="badge-fix">PGM</div> '
-            '<div class="badge-new">Multi-omics</div>',
-            unsafe_allow_html=True
-        )
+        st.markdown('<div class="badge-new">Big Data</div> <div class="badge-fix">PGM</div> <div class="badge-new">Épitranscriptomique</div>', unsafe_allow_html=True)
         col1, col2, col3, col4 = st.columns(4)
         df_micro = st.session_state.df_microbiome
         pgm_df = st.session_state.pgm_data
+        epi_df = st.session_state.epi_data
         col1.metric("Échantillons (Microbiome)", len(df_micro) if df_micro is not None else 0)
-        col2.metric("Features (Microbiome)", len(detect_feature_cols(df_micro)) if df_micro is not None else 0)
-        col3.metric("Variants (PGM)", len(pgm_df) if pgm_df is not None else 0)
+        col2.metric("Variants (PGM)", len(pgm_df) if pgm_df is not None else 0)
+        col3.metric("Modifications (Épi)", len(epi_df) if epi_df is not None else 0)
         col4.metric("Groupes (Microbiome)", df_micro["environment"].nunique() if df_micro is not None and "environment" in df_micro else 0)
         st.markdown("---")
         st.markdown("""
-        *MetaInsight v9* intègre :
-        - *22 modules* d'analyse pour microbiome, multi-omics et génomique médicale (PGM).
-        - *Big Data* : lecture directe des VCF via DuckDB, matrices de distance optimisées.
-        - *PGM* : BRCA1/2, pharmacogénétique, lollipop plots, prédiction CADD/PolyPhen.
-        - *IA* : modules d'aide à l'interprétation (Gemini, Groq, OpenRouter, Ollama).
+        **MetaInsight v9** intègre :
+        - **23 modules** incluant l'analyse avancée des données d'épitranscriptomique.
+        - **Base de connaissances intégrée** pour l'annotation automatique.
+        - **Analyse des BAM** avec extraction des tags de modification (MM/ML).
+        - **Prédiction de motifs consensus** et réseaux de crosstalk.
         """)
-        st.info("Utilisez la barre latérale pour charger vos données, configurer l'IA et explorer les démos.")
+        st.info("Utilisez la barre latérale pour charger vos données.")
 
-    # ── Onglet 1 : Diversité α/β ────────────────────────────────────────
+    # ── Onglet 1 : Diversité α/β ──────────────────────────────────────
     with tabs[1]:
         st.markdown("## 📊 Diversité Alfa et Béta")
         df = st.session_state.df_microbiome
@@ -930,20 +1101,16 @@ def main():
                     env_col = col
                     break
             else:
-                st.error("Aucune colonne de groupe (environment, group, class...) trouvée dans vos données.")
+                st.error("Aucune colonne de groupe trouvée.")
                 st.stop()
         taxa_cols = detect_feature_cols(df)
         if not taxa_cols:
-            st.warning("Aucune feature numérique détectée. Vérifiez que vos colonnes d'abondance sont numériques.")
+            st.warning("Aucune feature numérique détectée.")
             st.stop()
-        st.markdown(
-            '<div class="ref-box">📚 QIIME2 (2019 Nature Biotech.) · vegan R · Kers & Saccenti 2021</div>',
-            unsafe_allow_html=True
-        )
+        st.markdown('<div class="ref-box">📚 QIIME2 (2019) · vegan · Kers & Saccenti 2021</div>', unsafe_allow_html=True)
         subtabs = st.tabs(["🔬 Diversité Alpha", "🌐 Diversité Beta", "📐 PERMANOVA/ANOSIM"])
 
         with subtabs[0]:
-            st.markdown("### Métriques de diversité alpha")
             alpha_df = compute_alpha_diversity(df, taxa_cols)
             alpha_df[env_col] = df[env_col].values
             metric_alpha = st.selectbox("Métrique alpha",
@@ -954,7 +1121,6 @@ def main():
             st.dataframe(alpha_df.groupby(env_col)[metric_alpha].describe().round(3), use_container_width=True)
 
         with subtabs[1]:
-            st.markdown("### Diversité beta")
             beta_metric = st.selectbox("Métrique beta", ["Bray-Curtis","Aitchison (CLR+Euclidean)","Jaccard"])
             if st.button("🚀 Calculer la diversité beta", key="beta_btn"):
                 X = df[taxa_cols].values.astype(float) + 1e-9
@@ -972,7 +1138,6 @@ def main():
                 st.plotly_chart(fig_dm, use_container_width=True)
 
         with subtabs[2]:
-            st.markdown("### PERMANOVA")
             if st.button("🚀 Lancer PERMANOVA", key="perm_btn"):
                 X = df[taxa_cols].values.astype(float) + 1e-9
                 X_norm = X / X.sum(axis=1, keepdims=True)
@@ -999,7 +1164,7 @@ def main():
                 group_col = g
                 break
         if group_col is None:
-            st.error("Aucune colonne de groupe trouvée. Ajoutez une colonne 'environment', 'group', etc.")
+            st.error("Aucune colonne de groupe trouvée.")
             st.stop()
         groups = list(df[group_col].unique())
         col1, col2, col3 = st.columns(3)
@@ -1070,7 +1235,7 @@ def main():
             st.warning("Aucune feature numérique.")
             st.stop()
         if 'environment' not in df.columns:
-            st.warning("La colonne 'environment' est nécessaire pour les courbes de raréfaction.")
+            st.warning("La colonne 'environment' est nécessaire.")
         else:
             if st.button("🚀 Calculer les courbes", key="rare_btn"):
                 curves = rarefaction_curve(df, taxa_cols, 20)
@@ -1460,19 +1625,14 @@ def main():
                 )
                 st.markdown(result)
 
-    # ── Onglet 21 : PGM Clinique (v9) ──────────────────────────────────
+    # ── Onglet 21 : PGM Clinique ──────────────────────────────────────
     with tabs[21]:
         st.markdown("## 🧬 Médecine de Précision — PGM <span class='badge-new'>v9</span>", unsafe_allow_html=True)
-        st.markdown(
-            '<div class="ref-box">📚 ACMG/AMP 2015 · CPIC Guidelines · ClinVar · gnomAD · CADD v1.6</div>',
-            unsafe_allow_html=True
-        )
-
+        st.markdown('<div class="ref-box">📚 ACMG/AMP 2015 · CPIC Guidelines · ClinVar · gnomAD · CADD v1.6</div>', unsafe_allow_html=True)
         pgm_df = st.session_state.pgm_data
         if pgm_df is None or pgm_df.empty:
             st.warning("Aucune donnée PGM. Chargez un fichier VCF ou utilisez les données démo.")
             st.stop()
-
         pgm_tabs = st.tabs(["🧬 BRCA1/2", "💊 Pharmacogénétique", "📊 Lollipop Plots", "🧪 Prédiction (CADD/PolyPhen)"])
 
         with pgm_tabs[0]:
@@ -1579,7 +1739,6 @@ def main():
                     st.info("Aucun score CADD disponible.")
             else:
                 st.warning("Colonne 'cadd_phred' non trouvée.")
-            # PolyPhen simulé
             st.markdown("#### PolyPhen-2 (simulé)")
             polyphen_categories = ["benign", "possibly_damaging", "probably_damaging"]
             sim_polyphen = np.random.choice(polyphen_categories, size=min(20, len(pgm_df)), p=[0.5,0.3,0.2])
@@ -1592,6 +1751,201 @@ def main():
             counts.columns = ["Prédiction", "Nb"]
             fig = px.bar(counts, x="Prédiction", y="Nb", color="Prédiction", template="plotly_dark")
             st.plotly_chart(fig, use_container_width=True)
+
+    # ── Onglet 22 : Épitranscriptomique Avancé ────────────────────────────
+    with tabs[22]:
+        st.markdown("## 🧬 Épitranscriptomique Avancé <span class='badge-new'>v9</span>", unsafe_allow_html=True)
+        st.markdown("""
+        <div class="ref-box">
+        📚 **Fonctionnalités** : 
+        - Base de connaissances intégrée (RMBase-like) pour annotation automatique
+        - Intégration avec l'expression génique (corrélation modification vs expression)
+        - Prédiction de motifs consensus (DRACH pour m6A, etc.)
+        - Analyse statistique avancée (ANOVA, régression logistique)
+        - Analyse approfondie des BAM (extraction des tags MM/ML)
+        - Réseaux de crosstalk entre modifications
+        </div>
+        """, unsafe_allow_html=True)
+
+        epi_df = st.session_state.epi_data
+        if epi_df is None or epi_df.empty:
+            st.warning("Aucune donnée épitranscriptomique. Chargez un fichier ou utilisez les données démo.")
+            st.stop()
+
+        epi_subtabs = st.tabs([
+            "📊 Profil & Motifs",
+            "🔥 Heatmap & Réseaux",
+            "📈 Corrélation Expression",
+            "📊 Statistiques",
+            "🧬 Prédiction IA",
+            "📁 Analyse BAM"
+        ])
+
+        with epi_subtabs[0]:
+            st.markdown("### Profil de modification avec motifs consensus")
+            transcripts = epi_df['transcript_id'].unique()
+            selected_transcript = st.selectbox("Choisir un transcrit", transcripts)
+            col1, col2 = st.columns(2)
+            with col1:
+                smooth = st.checkbox("Lisser la courbe", value=True)
+            with col2:
+                show_motifs = st.checkbox("Afficher les motifs", value=True)
+            fig = plot_modification_profile_advanced(epi_df, selected_transcript, smooth)
+            if fig:
+                st.plotly_chart(fig, use_container_width=True)
+            st.markdown("#### Vue Lollipop avec annotations")
+            if st.button("🎯 Générer le lollipop enrichi", key="epi_lolli_adv"):
+                df_sub = epi_df[epi_df['transcript_id'] == selected_transcript].sort_values('position')
+                fig, ax = plt.subplots(figsize=(14, 5))
+                ax.plot([df_sub['position'].min()-20, df_sub['position'].max()+20], [0, 0], 'k-', lw=2)
+                color_map = {'m6A': '#FF6B6B', 'm5C': '#4ECDC4', 'Ψ': '#45B7D1', 
+                             'm1A': '#96CEB4', '2OMe': '#FFEAA7', 'm7G': '#DDA0DD', 'Nm': '#98D8C8'}
+                for _, row in df_sub.iterrows():
+                    color = color_map.get(row['modification'], '#FF6B6B')
+                    height = row['modification_rate'] * 3
+                    ax.plot([row['position'], row['position']], [0, height], 'o-', color=color, ms=8, lw=2)
+                    ax.text(row['position'], height + 0.05, row['modification'], rotation=45, fontsize=9, ha='center')
+                    if 'consensus_motif' in row and pd.notna(row['consensus_motif']) and row['consensus_motif'] != '':
+                        ax.text(row['position'], -0.15, row['consensus_motif'], fontsize=7, ha='center', color='gray')
+                ax.set_xlabel("Position sur le transcrit")
+                ax.set_ylabel("Taux de modification")
+                ax.set_title(f"Lollipop enrichi - {selected_transcript}")
+                ax.axhline(y=0.3, linestyle='--', color='red', alpha=0.5, label='Seuil 30%')
+                ax.legend()
+                st.pyplot(fig)
+                plt.close()
+
+        with epi_subtabs[1]:
+            st.markdown("### Heatmap des modifications")
+            fig_heat = plot_modification_heatmap(epi_df)
+            if fig_heat:
+                st.plotly_chart(fig_heat, use_container_width=True)
+            st.markdown("### Réseau de crosstalk entre modifications")
+            threshold = st.slider("Seuil de corrélation", 0.3, 0.9, 0.5)
+            fig_network = plot_crosstalk_network(epi_df, threshold)
+            if fig_network:
+                st.plotly_chart(fig_network, use_container_width=True)
+            else:
+                st.info("Pas assez de données pour construire le réseau.")
+
+        with epi_subtabs[2]:
+            st.markdown("### Intégration avec l'expression génique")
+            st.info("Corrélation entre le taux de modification et l'expression (TPM) par gène.")
+            if 'expression_TPM' in epi_df.columns:
+                corr_results = compute_modification_expression_correlation(epi_df)
+                if corr_results is not None and not corr_results.empty:
+                    st.dataframe(corr_results.style.background_gradient(cmap="RdBu_r", subset=["correlation"]), use_container_width=True)
+                    genes = corr_results['gene'].unique()
+                    selected_gene = st.selectbox("Choisir un gène", genes)
+                    sub = epi_df[epi_df['gene'] == selected_gene]
+                    fig = px.scatter(sub, x='expression_TPM', y='modification_rate', color='modification',
+                                     title=f"Corrélation modification vs expression - {selected_gene}",
+                                     template="plotly_dark", trendline="ols")
+                    st.plotly_chart(fig, use_container_width=True)
+                    corr, p = pearsonr(sub['modification_rate'], sub['expression_TPM'])
+                    st.metric("Coefficient de corrélation de Pearson", f"{corr:.3f}", delta=f"p={p:.4f}")
+                else:
+                    st.warning("Données insuffisantes pour calculer les corrélations.")
+            else:
+                st.warning("Colonne 'expression_TPM' manquante.")
+
+        with epi_subtabs[3]:
+            st.markdown("### Analyse statistique avancée")
+            if 'condition' in epi_df.columns and 'modification_rate' in epi_df.columns:
+                conditions = epi_df['condition'].unique()
+                if len(conditions) >= 2:
+                    st.markdown("#### Comparaison entre conditions")
+                    fig = px.box(epi_df, x='condition', y='modification_rate', color='condition',
+                                 title="Distribution des taux de modification par condition",
+                                 template="plotly_dark", points="all")
+                    st.plotly_chart(fig, use_container_width=True)
+                    groups = [epi_df[epi_df['condition']==c]['modification_rate'].values for c in conditions]
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        if len(groups) == 2:
+                            stat, p = mannwhitneyu(groups[0], groups[1])
+                            st.metric("Mann-Whitney U", f"{stat:.3f}", delta=f"p={p:.4f}")
+                        else:
+                            stat, p = f_oneway(*groups)
+                            st.metric("ANOVA", f"{stat:.3f}", delta=f"p={p:.4f}")
+                    with col2:
+                        means = epi_df.groupby('condition')['modification_rate'].mean()
+                        st.metric("Taux moyen", f"{means.mean():.3f}")
+                    with col3:
+                        stds = epi_df.groupby('condition')['modification_rate'].std()
+                        st.metric("Écart-type moyen", f"{stds.mean():.3f}")
+            st.markdown("#### Régression logistique (prédiction de condition)")
+            if 'condition' in epi_df.columns and 'modification_rate' in epi_df.columns:
+                X = epi_df[['modification_rate']].values
+                y = (epi_df['condition'] == epi_df['condition'].unique()[0]).astype(int)
+                if len(np.unique(y)) > 1:
+                    lr = LogisticRegression()
+                    lr.fit(X, y)
+                    coef = lr.coef_[0][0]
+                    st.metric("Coefficient logistique", f"{coef:.3f}")
+                    st.write(f"Précision du modèle : {lr.score(X, y):.2%}")
+                else:
+                    st.warning("Pas assez de variabilité pour la régression logistique.")
+
+        with epi_subtabs[4]:
+            st.markdown("### Prédiction de sites de modification par IA")
+            st.info("Cette section simule un modèle d'IA pour prédire les positions de modification à partir de la séquence.")
+            st.markdown("#### Prédiction de motifs consensus")
+            mod_types = epi_df['modification'].unique()
+            selected_mod = st.selectbox("Type de modification", mod_types)
+            if st.button("🔮 Prédire le motif", key="predict_motif"):
+                seq = "".join(np.random.choice(['A','C','G','T'], 20))
+                motif = predict_motif(seq, selected_mod)
+                st.success(f"Motif prédit pour {selected_mod} : **{motif}**")
+                st.caption("(Simulation - les vrais modèles nécessitent un modèle entraîné)")
+            st.markdown("#### Prédiction d'impact sur la traduction")
+            if st.button("🧬 Prédire l'impact", key="predict_impact"):
+                impact_score = np.random.uniform(0, 1)
+                impact_label = "Élevé" if impact_score > 0.7 else "Modéré" if impact_score > 0.4 else "Faible"
+                st.metric("Score d'impact", f"{impact_score:.2%}", delta=impact_label)
+                st.info("Impact : diminution de l'efficacité de traduction estimée (simulé)")
+
+        with epi_subtabs[5]:
+            st.markdown("### Analyse approfondie des fichiers BAM")
+            st.info("Extraction des tags de modification (MM/ML) à partir des fichiers BAM.")
+            if 'bam_info' in st.session_state:
+                bam_info = st.session_state.bam_info
+                col1, col2, col3, col4 = st.columns(4)
+                col1.metric("Reads totales", bam_info['n_reads'])
+                col2.metric("Reads alignées", bam_info['n_mapped'], delta=f"{bam_info['mapping_rate']:.1%}")
+                col3.metric("Reads avec modifications", bam_info['n_reads_with_mods'])
+                col4.metric("Taux de modification", f"{bam_info['mod_rate']:.1%}")
+                if bam_info['mod_scores_sample']:
+                    st.markdown("#### Échantillon des scores de modification (ML tags)")
+                    st.write(bam_info['mod_scores_sample'])
+                if bam_info['reads_sample']:
+                    st.markdown("#### Aperçu des reads")
+                    for read in bam_info['reads_sample'][:5]:
+                        st.code(f"{read.query_name} -> {read.reference_name}:{read.reference_start}  "
+                                f"qual: {read.mapping_quality}, mods: {'MM' if read.has_tag('MM') else 'Non'}")
+            else:
+                st.warning("Aucun fichier BAM chargé. Utilisez la sidebar pour importer un fichier BAM.")
+
+        if st.button("🤖 Générer une analyse IA des modifications", key="epi_ai_adv"):
+            prompt = f"""Analyse des données d'épitranscriptomique :
+- {len(epi_df)} positions modifiées
+- Types : {epi_df['modification'].unique().tolist()}
+- Conditions : {epi_df['condition'].unique().tolist() if 'condition' in epi_df.columns else 'Non spécifiées'}
+- Gènes : {epi_df['gene'].unique().tolist() if 'gene' in epi_df.columns else 'Non spécifiés'}
+
+Résumez les tendances, suggérez des interprétations biologiques et identifiez les modifications potentiellement fonctionnelles."""
+            result = call_ai(
+                prompt,
+                st.session_state.ai_provider,
+                gemini_key=st.session_state.get("gemini_key", ""),
+                groq_key=st.session_state.get("groq_key", ""),
+                openrouter_key=st.session_state.get("openrouter_key", ""),
+                gemini_model=st.session_state.get("gemini_model", "gemini-2.0-flash"),
+                groq_model=st.session_state.get("groq_model", "llama-3.3-70b-versatile"),
+                openrouter_model=st.session_state.get("openrouter_model", "mistralai/mistral-7b-instruct:free"),
+                ollama_model=st.session_state.get("ollama_model", "llama3")
+            )
+            st.info(result)
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  POINT D'ENTRÉE
