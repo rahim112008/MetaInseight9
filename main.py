@@ -597,10 +597,10 @@ def run_deep_model(model_name, X, y, test_size=0.2):
             pass
     return {"Accuracy": acc, "AUC": auc_val, "model": clf}
 
-# ── Fonctions IA (support gratuits) ──────────────────────────────────────
+# ── # ── Fonctions IA (support gratuits) ──────────────────────────────────────
 def call_ai(prompt, provider,
             gemini_key=None, groq_key=None, openrouter_key=None,
-            gemini_model="gemini-2.0-flash", groq_model="llama-3.3-70b-versatile",
+            gemini_model="gemini-3.6-flash", groq_model="llama-3.3-70b-versatile",
             openrouter_model="mistralai/mistral-7b-instruct:free",
             ollama_model="llama3",
             claude_key=None, deepseek_key=None):
