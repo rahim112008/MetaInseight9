@@ -1,6 +1,6 @@
 # ══════════════════════════════════════════════════════════════════════════════
 # MetaInsight v9 — Plateforme intégrative multi-omique, PGM & Épitranscriptomique
-# Version complète avec tous les onglets
+# Version corrigée — widgets avec clés uniques, IA gratuites intégrées
 # ══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -69,7 +69,7 @@ try:
 except ImportError:
     BIOPYTHON_AVAILABLE = False
 
-# ── Clés API ──────────────────────────────────────────────────────────────────
+# ── Clés API (variables d'environnement) ──────────────────────────────────
 _ENV_GEMINI_KEY     = os.environ.get('GEMINI_API_KEY', '')
 _ENV_GROQ_KEY       = os.environ.get('GROQ_API_KEY', '')
 _ENV_OPENROUTER_KEY = os.environ.get('OPENROUTER_API_KEY', '')
@@ -597,6 +597,7 @@ def run_deep_model(model_name, X, y, test_size=0.2):
             pass
     return {"Accuracy": acc, "AUC": auc_val, "model": clf}
 
+# ── Fonctions IA (support gratuits) ──────────────────────────────────────
 def call_ai(prompt, provider,
             gemini_key=None, groq_key=None, openrouter_key=None,
             gemini_model="gemini-2.0-flash", groq_model="llama-3.3-70b-versatile",
@@ -898,7 +899,7 @@ def plot_crosstalk_network(df, threshold=0.5):
     return fig
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  APPLICATION PRINCIPALE
+#  APPLICATION PRINCIPALE (corrigée)
 # ══════════════════════════════════════════════════════════════════════════════
 def main():
     # ── Initialisation session state ──────────────────────────────────────
@@ -928,11 +929,11 @@ def main():
         st.markdown('<span style="font-size:0.7rem;color:#7A8BA8;">Big Data · PGM · Épitranscriptomique</span>', unsafe_allow_html=True)
         st.markdown("---")
         
-        data_type = st.radio("Type de données", ["Microbiome", "PGM (VCF)", "Épitranscriptomique"], index=0)
+        data_type = st.radio("Type de données", ["Microbiome", "PGM (VCF)", "Épitranscriptomique"], index=0, key="data_type_radio")
         
         if data_type == "Microbiome":
             st.markdown("### 📂 Import microbiome")
-            uploaded_file = st.file_uploader("Charger CSV/TSV/BIOM/h5ad", type=["csv","tsv","txt","biom","h5ad","xlsx"])
+            uploaded_file = st.file_uploader("Charger CSV/TSV/BIOM/h5ad", type=["csv","tsv","txt","biom","h5ad","xlsx"], key="upload_micro")
             if uploaded_file is not None:
                 try:
                     df = pd.read_csv(uploaded_file)
@@ -942,7 +943,7 @@ def main():
                     st.success(f"✅ {len(df)} échantillons chargés.")
                 except Exception as e:
                     st.error(f"Erreur de chargement : {e}")
-            if st.button("⚡ Données démo microbiome"):
+            if st.button("⚡ Données démo microbiome", key="demo_micro_btn"):
                 st.session_state.df_microbiome = generate_demo_microbiome()
                 st.success("Données démo microbiome chargées.")
             df_micro = st.session_state.df_microbiome
@@ -951,7 +952,7 @@ def main():
         
         elif data_type == "PGM (VCF)":
             st.markdown("### 🧬 Import PGM (VCF)")
-            uploaded_vcf = st.file_uploader("Charger un fichier VCF", type=["vcf","vcf.gz","gz"])
+            uploaded_vcf = st.file_uploader("Charger un fichier VCF", type=["vcf","vcf.gz","gz"], key="upload_vcf")
             if uploaded_vcf is not None:
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".vcf.gz") as tmp:
                     tmp.write(uploaded_vcf.read())
@@ -963,7 +964,7 @@ def main():
                 else:
                     st.warning("Utilisation des données démo PGM.")
                     st.session_state.pgm_data = generate_demo_pgm_data()
-            if st.button("⚡ Données démo PGM"):
+            if st.button("⚡ Données démo PGM", key="demo_pgm_btn"):
                 st.session_state.pgm_data = generate_demo_pgm_data()
                 st.success("Données démo PGM chargées.")
             pgm_df = st.session_state.pgm_data
@@ -971,7 +972,7 @@ def main():
         
         else:  # Épitranscriptomique
             st.markdown("### 🧬 Import Épitranscriptomique")
-            uploaded_epi = st.file_uploader("Charger données de modifications (CSV/TSV)", type=["csv","tsv","txt"])
+            uploaded_epi = st.file_uploader("Charger données de modifications (CSV/TSV)", type=["csv","tsv","txt"], key="upload_epi")
             if uploaded_epi is not None:
                 df_epi = parse_epitranscriptomic_file(uploaded_epi)
                 if df_epi is not None and not df_epi.empty:
@@ -983,26 +984,26 @@ def main():
                     st.session_state.epi_data = generate_demo_epitranscriptomic_data()
             st.markdown("---")
             st.markdown("#### 🔍 Import FASTQ / BAM (analyse avancée)")
-            fastq_file = st.file_uploader("Charger FASTQ", type=["fastq","fq","fastq.gz"])
+            fastq_file = st.file_uploader("Charger FASTQ", type=["fastq","fq","fastq.gz"], key="upload_fastq")
             if fastq_file is not None:
                 fastq_info = parse_fastq_metadata(fastq_file)
                 if fastq_info:
                     st.success(f"✅ {fastq_info['n_reads']} reads, Q moyenne {fastq_info['avg_quality']:.1f}")
                     st.session_state.fastq_info = fastq_info
-            bam_file = st.file_uploader("Charger BAM", type=["bam"])
+            bam_file = st.file_uploader("Charger BAM", type=["bam"], key="upload_bam")
             if bam_file is not None:
                 bam_info = parse_bam_advanced(bam_file)
                 if bam_info:
                     st.success(f"✅ {bam_info['n_reads']} reads, {bam_info['n_mapped']} alignées, {bam_info['n_reads_with_mods']} avec mods")
                     st.session_state.bam_info = bam_info
-            if st.button("⚡ Données démo Épitranscriptomique"):
+            if st.button("⚡ Données démo Épitranscriptomique", key="demo_epi_btn"):
                 st.session_state.epi_data = generate_demo_epitranscriptomic_data()
                 st.success("Données démo épitranscriptomiques chargées.")
             epi_df = st.session_state.epi_data
             st.markdown(f"*{len(epi_df)}* positions · *{epi_df['modification'].nunique()}* types de modifications")
         
         st.markdown("---")
-        st.markdown("### 🤖 IA")
+        st.markdown("### 🤖 IA (gratuits)")
         provider = st.selectbox(
             "Fournisseur",
             ["Gemini Flash (Google — GRATUIT)", "Groq (gratuit)", "OpenRouter (gratuit)", "Ollama (local — gratuit)"],
@@ -1010,31 +1011,32 @@ def main():
             key="ai_provider_select"
         )
         st.session_state.ai_provider = provider
+        
         if provider == "Gemini Flash (Google — GRATUIT)":
             st.markdown("[🔑 Obtenir une clé gratuite](https://aistudio.google.com/apikey)")
             st.session_state.gemini_key = st.text_input("Clé API Gemini", type="password", 
                                                         value=st.session_state.get("gemini_key", ""),
-                                                        placeholder="AIza...")
-            st.session_state.gemini_model = st.selectbox("Modèle", ["gemini-2.0-flash", "gemini-2.5-flash"], index=0)
+                                                        placeholder="AIza...", key="gemini_key_input")
+            st.session_state.gemini_model = st.selectbox("Modèle", ["gemini-2.0-flash", "gemini-2.5-flash"], index=0, key="gemini_model_select")
         elif provider == "Groq (gratuit)":
             st.markdown("[🔑 Obtenir une clé gratuite](https://console.groq.com/keys)")
             st.session_state.groq_key = st.text_input("Clé API Groq", type="password",
                                                       value=st.session_state.get("groq_key", ""),
-                                                      placeholder="gsk_...")
-            st.session_state.groq_model = st.selectbox("Modèle Groq", ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"], index=0)
+                                                      placeholder="gsk_...", key="groq_key_input")
+            st.session_state.groq_model = st.selectbox("Modèle Groq", ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"], index=0, key="groq_model_select")
         elif provider == "OpenRouter (gratuit)":
             st.markdown("[🔑 Obtenir une clé gratuite](https://openrouter.ai/keys)")
             st.session_state.openrouter_key = st.text_input("Clé API OpenRouter", type="password",
                                                             value=st.session_state.get("openrouter_key", ""),
-                                                            placeholder="sk-or-...")
+                                                            placeholder="sk-or-...", key="openrouter_key_input")
             st.session_state.openrouter_model = st.selectbox("Modèle OpenRouter",
                                                              ["mistralai/mistral-7b-instruct:free",
                                                               "meta-llama/llama-3.1-8b-instruct:free"],
-                                                             index=0)
+                                                             index=0, key="openrouter_model_select")
         elif provider == "Ollama (local — gratuit)":
             st.session_state.ollama_model = st.text_input("Modèle Ollama", 
                                                           value=st.session_state.get("ollama_model", "llama3"),
-                                                          placeholder="llama3, mistral, etc.")
+                                                          placeholder="llama3, mistral, etc.", key="ollama_model_input")
             st.caption("💡 Assurez-vous qu'Ollama est lancé : `ollama serve`")
 
     # ── Onglets ────────────────────────────────────────────────────────────
@@ -1084,6 +1086,7 @@ def main():
         - **Base de connaissances intégrée** pour l'annotation automatique.
         - **Analyse des BAM** avec extraction des tags de modification (MM/ML).
         - **Prédiction de motifs consensus** et réseaux de crosstalk.
+        - **IA gratuites** : Gemini, Groq, OpenRouter, Ollama.
         """)
         st.info("Utilisez la barre latérale pour charger vos données.")
 
@@ -1114,14 +1117,15 @@ def main():
             alpha_df = compute_alpha_diversity(df, taxa_cols)
             alpha_df[env_col] = df[env_col].values
             metric_alpha = st.selectbox("Métrique alpha",
-                ["Shannon H'","Simpson (1-D)","Richness","Chao1","Evenness (J)","Faith PD (proxy)"])
+                ["Shannon H'","Simpson (1-D)","Richness","Chao1","Evenness (J)","Faith PD (proxy)"],
+                key="metric_alpha_select")
             fig_alpha = px.box(alpha_df, x=env_col, y=metric_alpha,
                                 color=env_col, template="plotly_dark", points="all")
             st.plotly_chart(fig_alpha, use_container_width=True)
             st.dataframe(alpha_df.groupby(env_col)[metric_alpha].describe().round(3), use_container_width=True)
 
         with subtabs[1]:
-            beta_metric = st.selectbox("Métrique beta", ["Bray-Curtis","Aitchison (CLR+Euclidean)","Jaccard"])
+            beta_metric = st.selectbox("Métrique beta", ["Bray-Curtis","Aitchison (CLR+Euclidean)","Jaccard"], key="beta_metric_select")
             if st.button("🚀 Calculer la diversité beta", key="beta_btn"):
                 X = df[taxa_cols].values.astype(float) + 1e-9
                 X_clr = clr_transform(X)
@@ -1169,11 +1173,11 @@ def main():
         groups = list(df[group_col].unique())
         col1, col2, col3 = st.columns(3)
         with col1:
-            method = st.selectbox("Méthode", ["ALDEx2-like (CLR+Wilcoxon+BH)", "LEfSe (LDA score)", "MaAsLin2-like"])
+            method = st.selectbox("Méthode", ["ALDEx2-like (CLR+Wilcoxon+BH)", "LEfSe (LDA score)", "MaAsLin2-like"], key="da_method")
         with col2:
-            g1 = st.selectbox("Groupe 1", groups, index=0)
+            g1 = st.selectbox("Groupe 1", groups, index=0, key="da_g1")
         with col3:
-            g2 = st.selectbox("Groupe 2", groups, index=min(1, len(groups)-1))
+            g2 = st.selectbox("Groupe 2", groups, index=min(1, len(groups)-1), key="da_g2")
         if st.button("🚀 Analyser", key="da_btn"):
             if method.startswith("ALDEx2"):
                 res = aldex2_like(df, taxa_cols, group_col, g1, g2)
@@ -1198,7 +1202,7 @@ def main():
         if not taxa_cols:
             st.warning("Aucune feature numérique.")
             st.stop()
-        transform_choice = st.selectbox("Transformation", ["CLR (Aitchison)", "TSS (relative)", "Log2+1"])
+        transform_choice = st.selectbox("Transformation", ["CLR (Aitchison)", "TSS (relative)", "Log2+1"], key="coda_transform")
         X_raw = df[taxa_cols].values.astype(float) + 1e-9
         if transform_choice == "CLR (Aitchison)":
             X_show = clr_transform(X_raw)
@@ -1270,9 +1274,9 @@ def main():
         groups = list(df[group_col].unique())
         col1, col2 = st.columns(2)
         with col1:
-            g_pos = st.selectbox("Groupe positif", groups, index=0)
+            g_pos = st.selectbox("Groupe positif", groups, index=0, key="roc_pos")
         with col2:
-            g_neg = st.selectbox("Groupe négatif", groups, index=min(1, len(groups)-1))
+            g_neg = st.selectbox("Groupe négatif", groups, index=min(1, len(groups)-1), key="roc_neg")
         if st.button("🚀 Calculer AUC", key="roc_btn"):
             sub = df[df[group_col].isin([g_pos, g_neg])]
             y = (sub[group_col] == g_pos).astype(int).values
@@ -1368,8 +1372,8 @@ def main():
         if not taxa_cols:
             st.warning("Aucune feature numérique.")
             st.stop()
-        cause = st.selectbox("Variable cause", taxa_cols, key="cause")
-        effect = st.selectbox("Variable effet", taxa_cols, index=min(1, len(taxa_cols)-1), key="effect")
+        cause = st.selectbox("Variable cause", taxa_cols, key="cause_select")
+        effect = st.selectbox("Variable effet", taxa_cols, index=min(1, len(taxa_cols)-1), key="effect_select")
         if st.button("🚀 Analyser", key="causal_btn"):
             corr, p = spearmanr(df[cause], df[effect])
             st.metric("Corrélation de Spearman", f"{corr:.3f}")
@@ -1386,7 +1390,7 @@ def main():
         if not taxa_cols:
             st.warning("Aucune feature numérique.")
             st.stop()
-        n_samples = st.slider("Échantillons à générer", 10, 200, 50)
+        n_samples = st.slider("Échantillons à générer", 10, 200, 50, key="gen_samples")
         group_col = None
         for g in ['environment','group','class','condition','label']:
             if g in df.columns:
@@ -1395,7 +1399,7 @@ def main():
         if group_col is None:
             st.error("Aucune colonne de groupe.")
             st.stop()
-        target_env = st.selectbox("Environnement cible", df[group_col].unique())
+        target_env = st.selectbox("Environnement cible", df[group_col].unique(), key="gen_target")
         if st.button("✨ Générer", key="gen_btn"):
             sub = df[df[group_col] == target_env][taxa_cols].values
             mean = sub.mean(axis=0)
@@ -1408,7 +1412,7 @@ def main():
     # ── Onglet 11 : Federated Learning ──────────────────────────────────
     with tabs[11]:
         st.markdown("## 🔒 Federated Learning")
-        rounds = st.slider("Rounds", 2, 20, 10)
+        rounds = st.slider("Rounds", 2, 20, 10, key="fed_rounds")
         if st.button("🚀 Simuler", key="fed_btn"):
             acc = 75 + 18 * (1 - np.exp(-np.arange(1, rounds+1)/5))
             fig = px.line(x=np.arange(1, rounds+1), y=acc, title="Convergence fédérée",
@@ -1426,7 +1430,7 @@ def main():
         if not taxa_cols:
             st.warning("Aucune feature numérique.")
             st.stop()
-        k = st.slider("Nombre de clusters", 2, 8, 4)
+        k = st.slider("Nombre de clusters", 2, 8, 4, key="clust_k")
         if st.button("🚀 Clustering", key="clust_btn"):
             X = clr_transform(df[taxa_cols].values.astype(float) + 1e-9)
             kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
@@ -1476,7 +1480,7 @@ def main():
         if not taxa_cols:
             st.warning("Aucune feature numérique.")
             st.stop()
-        taxon = st.selectbox("Taxon", taxa_cols)
+        taxon = st.selectbox("Taxon", taxa_cols, key="dyn_taxon")
         if st.button("🚀 Modéliser", key="dyn_btn"):
             vals = df[taxon].values
             time = np.arange(len(vals))
@@ -1540,7 +1544,7 @@ def main():
             fig = px.bar(imp_df, x="Importance", y="Feature", orientation='h', template="plotly_dark")
             st.plotly_chart(fig, use_container_width=True)
 
-    # ── Onglet 17 : GNN ─────────────────────────────────────────────────
+    # ── Onglet 17 : GNN (CORRIGÉ avec clé unique) ─────────────────────
     with tabs[17]:
         st.markdown("## 🕸 GNN — Réseau de co-occurrence")
         df = st.session_state.df_microbiome
@@ -1551,6 +1555,7 @@ def main():
         if not taxa_cols:
             st.warning("Aucune feature numérique.")
             st.stop()
+        # Clé unique ajoutée
         threshold = st.slider("Seuil de corrélation", 0.3, 0.9, 0.5, key="corr_threshold_gnn")
         if st.button("🚀 Construire le réseau", key="gnn_btn"):
             X = clr_transform(df[taxa_cols].values.astype(float) + 1e-9)
@@ -1582,7 +1587,7 @@ def main():
     # ── Onglet 18 : Rapport IA ──────────────────────────────────────────
     with tabs[18]:
         st.markdown("## 📄 Rapport IA — Synthèse automatique")
-        prompt = st.text_area("Question ou focus", "Analyser les différences entre groupes")
+        prompt = st.text_area("Question ou focus", "Analyser les différences entre groupes", key="report_prompt")
         if st.button("🤖 Générer", key="report_btn"):
             result = call_ai(
                 prompt,
@@ -1607,8 +1612,8 @@ def main():
     with tabs[20]:
         st.markdown("## 📝 Article Scientifique")
         with st.form("article_form"):
-            title = st.text_input("Titre", "Analyse intégrative multi-omique")
-            sections = st.multiselect("Sections", ["Résumé","Introduction","Méthodes","Résultats","Discussion"])
+            title = st.text_input("Titre", "Analyse intégrative multi-omique", key="article_title")
+            sections = st.multiselect("Sections", ["Résumé","Introduction","Méthodes","Résultats","Discussion"], key="article_sections")
             submitted = st.form_submit_button("🤖 Générer l'article")
             if submitted:
                 prompt = f"Générer un article scientifique intitulé '{title}' avec les sections {', '.join(sections)}. Utilisez des données réelles de microbiome."
@@ -1685,7 +1690,7 @@ def main():
 
         with pgm_tabs[2]:
             st.markdown("### Visualisation des mutations (Lollipop)")
-            gene_choice = st.selectbox("Gène cible", ["BRCA1", "BRCA2", "TP53"], index=0)
+            gene_choice = st.selectbox("Gène cible", ["BRCA1", "BRCA2", "TP53"], index=0, key="lolli_gene")
             domains = {
                 "BRCA1": [{"name": "RING", "start": 20, "end": 110}, {"name": "BRCT1", "start": 1650, "end": 1750}, {"name": "BRCT2", "start": 1800, "end": 1860}],
                 "BRCA2": [{"name": "HEAT repeat", "start": 50, "end": 300}, {"name": "BRC repeat", "start": 1000, "end": 1200}, {"name": "DNA-binding", "start": 2500, "end": 2800}],
@@ -1752,7 +1757,7 @@ def main():
             fig = px.bar(counts, x="Prédiction", y="Nb", color="Prédiction", template="plotly_dark")
             st.plotly_chart(fig, use_container_width=True)
 
-    # ── Onglet 22 : Épitranscriptomique Avancé ────────────────────────────
+    # ── Onglet 22 : Épitranscriptomique Avancé (CORRIGÉ avec clé unique) ──
     with tabs[22]:
         st.markdown("## 🧬 Épitranscriptomique Avancé <span class='badge-new'>v9</span>", unsafe_allow_html=True)
         st.markdown("""
@@ -1784,12 +1789,12 @@ def main():
         with epi_subtabs[0]:
             st.markdown("### Profil de modification avec motifs consensus")
             transcripts = epi_df['transcript_id'].unique()
-            selected_transcript = st.selectbox("Choisir un transcrit", transcripts)
+            selected_transcript = st.selectbox("Choisir un transcrit", transcripts, key="epi_transcript")
             col1, col2 = st.columns(2)
             with col1:
-                smooth = st.checkbox("Lisser la courbe", value=True)
+                smooth = st.checkbox("Lisser la courbe", value=True, key="epi_smooth")
             with col2:
-                show_motifs = st.checkbox("Afficher les motifs", value=True)
+                show_motifs = st.checkbox("Afficher les motifs", value=True, key="epi_motifs")
             fig = plot_modification_profile_advanced(epi_df, selected_transcript, smooth)
             if fig:
                 st.plotly_chart(fig, use_container_width=True)
@@ -1821,6 +1826,7 @@ def main():
             if fig_heat:
                 st.plotly_chart(fig_heat, use_container_width=True)
             st.markdown("### Réseau de crosstalk entre modifications")
+            # Clé unique ajoutée
             threshold = st.slider("Seuil de corrélation", 0.3, 0.9, 0.5, key="corr_threshold_epi")
             fig_network = plot_crosstalk_network(epi_df, threshold)
             if fig_network:
@@ -1836,7 +1842,7 @@ def main():
                 if corr_results is not None and not corr_results.empty:
                     st.dataframe(corr_results.style.background_gradient(cmap="RdBu_r", subset=["correlation"]), use_container_width=True)
                     genes = corr_results['gene'].unique()
-                    selected_gene = st.selectbox("Choisir un gène", genes)
+                    selected_gene = st.selectbox("Choisir un gène", genes, key="epi_gene_corr")
                     sub = epi_df[epi_df['gene'] == selected_gene]
                     fig = px.scatter(sub, x='expression_TPM', y='modification_rate', color='modification',
                                      title=f"Corrélation modification vs expression - {selected_gene}",
@@ -1892,7 +1898,7 @@ def main():
             st.info("Cette section simule un modèle d'IA pour prédire les positions de modification à partir de la séquence.")
             st.markdown("#### Prédiction de motifs consensus")
             mod_types = epi_df['modification'].unique()
-            selected_mod = st.selectbox("Type de modification", mod_types)
+            selected_mod = st.selectbox("Type de modification", mod_types, key="epi_mod_pred")
             if st.button("🔮 Prédire le motif", key="predict_motif"):
                 seq = "".join(np.random.choice(['A','C','G','T'], 20))
                 motif = predict_motif(seq, selected_mod)
